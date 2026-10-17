@@ -1,0 +1,18 @@
+[project]
+name = "wisdom-storage"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "pymupdf",
+    "httpx",
+    "pydantic",
+    "typer",
+    "sqlalchemy",
+    "tenacity",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-cov", "ruff", "mypy"]
+
+[project.scripts]
+wisdom = "wisdom.cli:app"

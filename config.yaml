@@ -1,0 +1,12 @@
+vault_path: "/path/to/your/ObsidianVault"
+data_path: "./data"
+
+metadata:
+  crossref_enabled: true
+  openalex_enabled: true
+  contact_email: "your-email@example.com"
+
+ai:
+  provider: "local"
+  model: "your-local-model"
+  allow_external_pdf_upload: false
