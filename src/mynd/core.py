@@ -4,15 +4,18 @@ import hashlib
 import re
 import shutil
 import sqlite3
+import sys
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import quote
 
 import httpx
 import pymupdf
 
+# Import model management
+from ai.models import get_model_manager
 
 DOI_RE = re.compile(r"\b10\.\d{4,9}/[-._;()/:A-Z0-9]+\b", re.IGNORECASE)
 
@@ -27,6 +30,7 @@ class Settings:
     grobid_url: str = "http://localhost:8070"
     use_grobid: bool = True
     crossref_email: str = "you@example.com"
+    use_local_llm: bool = True  # New setting for LLM preference
 
 
 def load_settings(path: Path) -> Settings:
@@ -48,6 +52,7 @@ def load_settings(path: Path) -> Settings:
         grobid_url=raw.get("grobid_url", "http://localhost:8070").rstrip("/"),
         use_grobid=bool(raw.get("use_grobid", True)),
         crossref_email=raw.get("crossref_email", "you@example.com"),
+        use_local_llm=raw.get("use_local_llm", True),
     )
 
 
@@ -350,8 +355,14 @@ def _citation_records(settings: Settings, paper_id: str) -> list[dict[str, Any]]
     return [dict(row) for row in rows]
 
 
-def ingest_pdf(pdf_path: Path, settings: Settings, crossref: CrossrefClient | None = None) -> dict[str, Any]:
+def ingest_pdf(
+    pdf_path: Path,
+    settings: Settings,
+    crossref: CrossrefClient | None = None,
+    progress: Callable[[str], None] | None = None,
+) -> dict[str, Any]:
     """Ingest one PDF. Safe to call repeatedly for the same file."""
+    report = progress or (lambda _message: None)
     if not pdf_path.exists() or pdf_path.suffix.lower() != ".pdf":
         raise ValueError(f"Not a PDF file: {pdf_path}")
 
@@ -365,6 +376,7 @@ def ingest_pdf(pdf_path: Path, settings: Settings, crossref: CrossrefClient | No
             "SELECT id, paper_id, stored_path FROM documents WHERE sha256=?", (digest,)
         ).fetchone()
         if existing:
+            report(f"Already ingested: {pdf_path.name}; refreshing note and references")
             paper_id = existing[1]
             existing_pdf_path = Path(existing[2])
             if not existing_pdf_path.is_file():
@@ -387,6 +399,7 @@ def ingest_pdf(pdf_path: Path, settings: Settings, crossref: CrossrefClient | No
             extraction_error = None
             if settings.use_grobid:
                 try:
+                    report("Extracting bibliography with GROBID")
                     _extract_and_store_references(existing_pdf_path, paper_id, settings)
                 except (httpx.HTTPError, ET.ParseError, OSError) as exc:
                     extraction_error = _reference_error_detail(exc)
@@ -402,7 +415,9 @@ def ingest_pdf(pdf_path: Path, settings: Settings, crossref: CrossrefClient | No
             return result
 
     if not stored_pdf.exists():
+        report("Copying PDF into the library")
         shutil.copy2(pdf_path, stored_pdf)
+    report("Extracting text and DOI from PDF")
     text, doi = extract_pdf(stored_pdf)
     metadata: dict[str, Any] = {
         "doi": doi, "title": pdf_path.stem, "authors": [], "year": None,
@@ -410,6 +425,7 @@ def ingest_pdf(pdf_path: Path, settings: Settings, crossref: CrossrefClient | No
     }
     if crossref and doi:
         try:
+            report(f"Looking up DOI metadata: {doi}")
             item = crossref.by_doi(doi)
             if item:
                 metadata.update({k: v for k, v in metadata_from_crossref(item).items() if v is not None})
@@ -452,6 +468,7 @@ def ingest_pdf(pdf_path: Path, settings: Settings, crossref: CrossrefClient | No
     extraction_error = None
     if settings.use_grobid:
         try:
+            report("Extracting bibliography with GROBID")
             refs = extract_grobid_references(stored_pdf, settings.grobid_url)
             for ref in refs:
                 target_id = None
@@ -493,6 +510,7 @@ def ingest_pdf(pdf_path: Path, settings: Settings, crossref: CrossrefClient | No
             extraction_error = _reference_error_detail(exc)
             citations = []
 
+    report("Writing Obsidian note")
     note = write_note(settings.vault_path, paper_id, metadata, stored_pdf, citations)
     with sqlite3.connect(settings.database_path) as db:
         db.execute("UPDATE papers SET note_path=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
@@ -522,13 +540,33 @@ def _reference_error_detail(exc: Exception) -> str:
 
 
 def process_inbox(settings: Settings, crossref: CrossrefClient | None = None) -> list[dict[str, Any]]:
+    def report(message: str) -> None:
+        print(f"[ingest] {message}", file=sys.stderr, flush=True)
+
     settings.inbox_path.mkdir(parents=True, exist_ok=True)
     settings.vault_path.mkdir(parents=True, exist_ok=True)
     init_db(settings.database_path)
+
+    pdfs = sorted(settings.inbox_path.glob("*.pdf"))
+    report(f"Found {len(pdfs)} PDF{'s' if len(pdfs) != 1 else ''} in {settings.inbox_path}")
+    if not pdfs:
+        return []
+
+    # Ensure the LLM is ready for future summarization.
+    manager = get_model_manager(use_local=settings.use_local_llm)
+    report(f"Checking summarization model availability ({manager.model})")
+    if not manager.ensure_model():
+        report(f"Model {manager.model} is unavailable; continuing ingestion without summarization")
+    else:
+        report(f"Summarization model ready: {manager.model}")
+
     results = []
-    for pdf in sorted(settings.inbox_path.glob("*.pdf")):
+    for index, pdf in enumerate(pdfs, start=1):
+        report(f"PDF {index}/{len(pdfs)}: {pdf.name}")
         try:
-            results.append(ingest_pdf(pdf, settings, crossref))
+            result = ingest_pdf(pdf, settings, crossref, progress=report)
+            results.append(result)
+            report(f"Finished PDF {index}/{len(pdfs)}: {pdf.name} ({result['status']})")
         except Exception as exc:
             with sqlite3.connect(settings.database_path) as db:
                 db.execute(
@@ -536,6 +574,7 @@ def process_inbox(settings: Settings, crossref: CrossrefClient | None = None) ->
                     (sha256_file(pdf), pdf.name, "failed", str(exc)),
                 )
             results.append({"status": "failed", "filename": pdf.name, "error": str(exc)})
+            report(f"Failed PDF {index}/{len(pdfs)}: {pdf.name}: {exc}")
     return results
 
 
