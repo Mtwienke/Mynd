@@ -1,0 +1,2 @@
+[console_scripts]
+mynd = mynd.cli:app

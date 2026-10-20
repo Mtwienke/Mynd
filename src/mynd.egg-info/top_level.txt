@@ -1,0 +1,6 @@
+ai
+ingestion
+mynd
+resolution
+storage
+vault
