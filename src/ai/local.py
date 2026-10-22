@@ -12,13 +12,16 @@ class OllamaGenerator:
 
     def __init__(
         self,
-        model: str = "mistral",
+        model: str = "qwen3:8b",
         base_url: str = "http://localhost:11434",
-        timeout: float = 180.0,
+        timeout: float = 600.0,
     ) -> None:
         self.model = model
         self.base_url = base_url.rstrip("/")
-        self.client = httpx.Client(base_url=self.base_url, timeout=timeout)
+        self.client = httpx.Client(
+            base_url=self.base_url,
+            timeout=httpx.Timeout(timeout, connect=min(timeout, 10.0)),
+        )
 
     def is_running(self) -> bool:
         """Check if Ollama is running and the model is available."""

@@ -16,6 +16,7 @@ import pymupdf
 
 # Import model management
 from ai.models import get_model_manager
+from ai.summarize import SummaryWriter
 
 DOI_RE = re.compile(r"\b10\.\d{4,9}/[-._;()/:A-Z0-9]+\b", re.IGNORECASE)
 
@@ -82,6 +83,26 @@ def extract_pdf(path: Path) -> tuple[str, str | None]:
         candidates = [metadata.get("subject", ""), metadata.get("keywords", ""), text[:30000]]
         doi = next((found for item in candidates if (found := normalize_doi(item))), None)
         return text, doi
+
+
+def _save_extracted_text(data_path: Path, stored_pdf: Path, text: str) -> Path:
+    """Persist the full PDF text extraction for inspection and troubleshooting."""
+    output_dir = data_path / "extracted_text"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output = output_dir / f"{stored_pdf.stem}.txt"
+    output.write_text(text, encoding="utf-8")
+    return output
+
+
+def _text_without_references(text: str) -> str:
+    """Exclude a terminal bibliography from the text sent to the summarizer."""
+    heading = re.compile(
+        r"(?im)^[ \t]*(?:REFERENCES(?:[ \t]+AND[ \t]+NOTES)?|BIBLIOGRAPHY)[ \t]*$"
+    )
+    for match in heading.finditer(text):
+        if match.start() >= len(text) // 2:
+            return text[:match.start()].rstrip()
+    return text
 
 
 class CrossrefClient:
@@ -207,7 +228,8 @@ def _yaml_quote(value: str) -> str:
 
 
 def write_note(vault: Path, paper_id: str, metadata: dict[str, Any], source_pdf: Path,
-               citations: list[dict[str, Any]] | None = None) -> Path:
+               citations: list[dict[str, Any]] | None = None,
+               summary: str | None = None) -> Path:
     papers_dir = vault / "10 Papers"
     papers_dir.mkdir(parents=True, exist_ok=True)
     title = metadata.get("title") or source_pdf.stem
@@ -220,24 +242,39 @@ def write_note(vault: Path, paper_id: str, metadata: dict[str, Any], source_pdf:
     for citation in citations or []:
         target_path = citation.get("target_note")
         raw = citation.get("raw_reference", "").strip()
+        importance = citation.get("importance")
+        direction = citation.get("direction")
+        similarity = citation.get("similarity")
+        labels = []
+        if importance:
+            labels.append(f"**{importance}**")
+        if direction:
+            labels.append(f"_{direction}_")
+        if similarity:
+            labels.append(f"Similarity: {similarity}")
+        annotation = " · ".join(labels)
         if target_path:
             relative = Path(target_path).stem
-            citation_lines.append(f"- [[{relative}]]")
+            citation_lines.append(f"- [[{relative}]]" + (f" — {annotation}" if annotation else ""))
         else:
             status = citation.get("status", "unresolved")
-            citation_lines.append(f"- **{status.title()} reference:** {raw}")
+            citation_lines.append(f"- **{status.title()} reference:** {raw}" + (f" — {annotation}" if annotation else ""))
     cites = "\n".join(citation_lines) if citation_lines else "_No references extracted yet._"
 
     # Preserve human-authored sections if this note already exists.
     human_sections = {}
     if path.exists():
         old = path.read_text(encoding="utf-8")
-        for heading in ("My notes", "Questions", "Reading log"):
+        for heading in ("Summary", "My notes", "Questions", "Reading log"):
             marker = f"## {heading}"
             if marker in old:
                 section = old.split(marker, 1)[1]
                 next_heading = re.search(r"\n## ", section)
                 human_sections[heading] = section[:next_heading.start()].strip() if next_heading else section.strip()
+
+    summary_content = summary or human_sections.get("Summary")
+    if not summary_content:
+        summary_content = "_Summary unavailable. Check model availability and retry ingestion._"
 
     content = f"""---
 type: paper
@@ -258,7 +295,7 @@ status: inbox
 
 ## Summary
 
-_Not generated yet. Add an AI summary in a later version._
+{summary_content}
 
 ## Abstract
 
@@ -269,6 +306,8 @@ _Not generated yet. Add an AI summary in a later version._
 {human_sections.get('My notes', '_Add your own interpretation here. This section is preserved during note updates._')}
 
 ## References
+
+Importance describes the paper's role in this work (foundational, closely related, or supporting); direction tags indicate what it contributes (method, benchmark, topic, or context). Treat these as tentative reading aids, not citation counts.
 
 {cites}
 
@@ -360,6 +399,7 @@ def ingest_pdf(
     settings: Settings,
     crossref: CrossrefClient | None = None,
     progress: Callable[[str], None] | None = None,
+    summarizer: SummaryWriter | None = None,
 ) -> dict[str, Any]:
     """Ingest one PDF. Safe to call repeatedly for the same file."""
     report = progress or (lambda _message: None)
@@ -388,6 +428,12 @@ def ingest_pdf(
                     db.execute("UPDATE documents SET stored_path=? WHERE id=?",
                                (str(existing_pdf_path), existing[0]))
                     db.commit()
+            extracted_text_row = db.execute(
+                "SELECT extracted_text FROM documents WHERE id=?", (existing[0],)
+            ).fetchone()
+            extracted_text = extracted_text_row[0] if extracted_text_row else ""
+            extracted_text_path = _save_extracted_text(settings.data_path, existing_pdf_path, extracted_text)
+            report(f"Saved full extracted text: {extracted_text_path}")
             paper = db.execute("SELECT doi, title, year, authors_json, venue, url, abstract, metadata_json FROM papers WHERE id=?",
                                (paper_id,)).fetchone()
             import json
@@ -403,13 +449,25 @@ def ingest_pdf(
                     _extract_and_store_references(existing_pdf_path, paper_id, settings)
                 except (httpx.HTTPError, ET.ParseError, OSError) as exc:
                     extraction_error = _reference_error_detail(exc)
+            summary = None
+            if summarizer and extracted_text:
+                summary_text = _text_without_references(extracted_text)
+                report(
+                    f"Summarizing paper text ({len(summary_text):,} of "
+                    f"{len(extracted_text):,} characters; terminal references excluded)"
+                )
+                summary = summarizer.summarize(summary_text, metadata, progress=report)
+                citations = summarizer.annotate_references(summary_text, _citation_records(settings, paper_id), metadata)
+                report("Summary generated")
+            report("Writing Obsidian note")
             note = write_note(settings.vault_path, paper_id, metadata, existing_pdf_path,
-                              _citation_records(settings, paper_id))
+                              citations if summarizer and extracted_text else _citation_records(settings, paper_id), summary)
             db.execute("UPDATE papers SET note_path=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
                        (str(note), paper_id))
             db.commit()
             result = {"status": "already_ingested", "paper_id": paper_id, "note": note,
-                      "references_extracted": len(_citation_records(settings, paper_id))}
+                      "references_extracted": len(_citation_records(settings, paper_id)),
+                      "extracted_text": extracted_text_path}
             if extraction_error:
                 result["references_error"] = extraction_error
             return result
@@ -419,6 +477,8 @@ def ingest_pdf(
         shutil.copy2(pdf_path, stored_pdf)
     report("Extracting text and DOI from PDF")
     text, doi = extract_pdf(stored_pdf)
+    extracted_text_path = _save_extracted_text(settings.data_path, stored_pdf, text)
+    report(f"Saved full extracted text: {extracted_text_path}")
     metadata: dict[str, Any] = {
         "doi": doi, "title": pdf_path.stem, "authors": [], "year": None,
         "venue": None, "url": None, "abstract": None, "type": None,
@@ -510,8 +570,19 @@ def ingest_pdf(
             extraction_error = _reference_error_detail(exc)
             citations = []
 
+    summary = None
+    if summarizer:
+        summary_text = _text_without_references(text)
+        report(
+            f"Summarizing paper text ({len(summary_text):,} of "
+            f"{len(text):,} characters; terminal references excluded)"
+        )
+        summary = summarizer.summarize(summary_text, metadata, progress=report)
+        citations = summarizer.annotate_references(summary_text, citations, metadata)
+        report("Summary generated")
+
     report("Writing Obsidian note")
-    note = write_note(settings.vault_path, paper_id, metadata, stored_pdf, citations)
+    note = write_note(settings.vault_path, paper_id, metadata, stored_pdf, citations, summary)
     with sqlite3.connect(settings.database_path) as db:
         db.execute("UPDATE papers SET note_path=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
                    (str(note), paper_id))
@@ -523,6 +594,7 @@ def ingest_pdf(
         "title": metadata.get("title"),
         "note": note,
         "references_extracted": len(citations),
+        "extracted_text": extracted_text_path,
     }
     if settings.use_grobid and not citations and extraction_error:
         result["references_error"] = extraction_error
@@ -557,14 +629,16 @@ def process_inbox(settings: Settings, crossref: CrossrefClient | None = None) ->
     report(f"Checking summarization model availability ({manager.model})")
     if not manager.ensure_model():
         report(f"Model {manager.model} is unavailable; continuing ingestion without summarization")
+        summarizer = None
     else:
         report(f"Summarization model ready: {manager.model}")
+        summarizer = SummaryWriter(manager)
 
     results = []
     for index, pdf in enumerate(pdfs, start=1):
         report(f"PDF {index}/{len(pdfs)}: {pdf.name}")
         try:
-            result = ingest_pdf(pdf, settings, crossref, progress=report)
+            result = ingest_pdf(pdf, settings, crossref, progress=report, summarizer=summarizer)
             results.append(result)
             report(f"Finished PDF {index}/{len(pdfs)}: {pdf.name} ({result['status']})")
         except Exception as exc:

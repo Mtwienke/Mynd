@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
+from typing import Callable
 
 from ai.base import TextGenerator
 
@@ -24,8 +26,14 @@ class SummaryWriter:
         if self.overlap_chars < 0 or self.overlap_chars >= self.chunk_chars:
             raise ValueError("overlap_chars must be between 0 and chunk_chars")
 
-    def summarize(self, text: str, metadata: dict | None = None) -> str:
+    def summarize(
+        self,
+        text: str,
+        metadata: dict | None = None,
+        progress: Callable[[str], None] | None = None,
+    ) -> str:
         """Return a concise Markdown summary, grounded in the supplied paper text."""
+        report = progress or (lambda _message: None)
         source = text.strip()
         if not source:
             raise ValueError("Cannot summarize empty paper text")
@@ -35,18 +43,24 @@ class SummaryWriter:
         if len(chunks) == 1:
             material = chunks[0]
         else:
-            notes = [
-                self.generator.generate(self._chunk_prompt(chunk, index, len(chunks), context))
-                for index, chunk in enumerate(chunks, start=1)
-            ]
+            notes = []
+            for index, chunk in enumerate(chunks, start=1):
+                report(f"Summarizing text part {index}/{len(chunks)}")
+                notes.append(self.generator.generate(
+                    self._chunk_prompt(chunk, index, len(chunks), context)
+                ))
             material = "\n\n".join(notes)
 
+        report("Generating final paper summary")
         prompt = f"""You are writing a study summary for a personal research library.
 Use only claims supported by the source material below. Do not invent details.
-If the text does not establish something, say so briefly. Write clear Markdown
-under these headings: `## Overview`, `## Main contributions`, `## Approach`,
-`## Findings`, and `## Limitations and open questions`. Omit a heading if the
-source gives no useful information for it. Keep the whole summary concise.
+If the text does not establish something, say so briefly. Output clear Markdown
+using these exact headings in this exact order: `## Overview`,
+`## Main contributions`, `## Approach`, `## Findings`, and
+`## Limitations and open questions`. Do not rename or omit these headings.
+If a heading has little evidence, say so briefly under it. Summarize the paper's
+own claims and findings, not its bibliography or what cited papers claim.
+Keep the whole summary concise.
 
 Paper metadata:
 {context or "Not provided"}
@@ -55,6 +69,29 @@ Source material:
 {material}
 """
         return self.generator.generate(prompt).strip()
+
+    def annotate_references(self, text: str, references: list[dict], metadata: dict | None = None) -> list[dict]:
+        """Add tentative reading cues to extracted references, grounded in the paper text."""
+        if not references:
+            return references
+        context = self._metadata_context(metadata or {})
+        entries = "\n".join(f"{i}: {ref.get('raw_reference', '')}" for i, ref in enumerate(references))
+        prompt = f"""For each bibliography entry, classify its apparent role in the source paper using only evidence in the paper text. Return JSON only: an array of objects with index, importance, similarity, and directions. importance must be one of foundational, closely related, supporting, unclear. similarity must be one of very similar, related, adjacent, unclear. directions must be a short array chosen from method, benchmark, topic, dataset, theory, context, comparison. Use unclear when evidence is insufficient. Do not infer importance merely from citation presence.
+Paper metadata:\n{context or 'Not provided'}\n\nBibliography entries:\n{entries}\n\nPaper text (bibliography excluded):\n{text[:50000]}"""
+        try:
+            result = self.generator.generate(prompt).strip()
+            result = result.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+            annotations = json.loads(result)
+            for item in annotations:
+                index = item.get("index")
+                if isinstance(index, int) and 0 <= index < len(references):
+                    ref = references[index]
+                    ref["importance"] = item.get("importance")
+                    ref["similarity"] = item.get("similarity")
+                    ref["direction"] = ", ".join(item.get("directions", []))
+        except (ValueError, TypeError, AttributeError):
+            pass
+        return references
 
     def _chunks(self, text: str) -> list[str]:
         chunks = []

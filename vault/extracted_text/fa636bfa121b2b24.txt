@@ -1,0 +1,2252 @@
+Evolutionary Optimization
+of Physics-Informed Neural
+Networks: Evo-PINN
+Frontiers and Opportunities
+Jian Cheng Wong
+Agency for Science, Technology, Research (A*STAR)
+SINGAPORE, 138634
+Abhishek Gupta
+Indian Institute of Technology (IIT) Goa, Ponda, 403401,
+INDIA
+Chin Chun Ooi
+and Pao-Hsiung Chiu
+Agency for Science, Technology, Research (A*STAR)
+SINGAPORE, 138634
+Jiao Liu
+Nanyang Technological University, SINGAPORE, 639798
+Yew-Soon Ong
+Agency for Science, Technology, Research (A*STAR)
+SINGAPORE, 138634 and also Nanyang Technological
+University, SINGAPORE, 639798
+Abstract—Deep learning models trained on ﬁnite data lack a
+complete understanding of the physical world. On the other
+hand, physics-informed neural networks (PINNs) are infused
+with
+such
+knowledge
+through
+the
+incorporation
+of
+mathematically expressible laws of nature into their training
+loss function. By complying with physical laws, PINNs
+@SHUTTERSTOCK/PHONLAMAI PHOTO
+Digital Object Identiﬁer 10.1109/MCI.2025.3607749
+Date of current version: 8 January 2026
+This article was recommended for publication by Associate Editor Min Jiang. Corre-
+sponding author: Jian Cheng Wong (e-mail: wongj@a-star.edu.sg).
+16
+IEEE COMPUTATIONAL INTELLIGENCE MAGAZINE | FEBRUARY 2026
+1556-603X  2026 IEEE. All rights reserved, including rights for text
+and data mining, and training of artiﬁcial intelligence and similar technologies.
+Authorized licensed use limited to: UNIVERSITÄTSBIBLIOTHEK PADERBORN. Downloaded on October 12,2026 at 06:32:43 UTC from IEEE Xplore.  Restrictions apply. 
+
+
+provide advantages over purely data-driven models in limited-
+data regimes and present as a promising route towards Physical
+AI. This feature has propelled them to the forefront of
+scientiﬁc machine learning, a domain characterized by scarce
+and costly data. However, the vision of accurate physics-
+informed learning comes with signiﬁcant challenges. This
+work examines PINNs in terms of model optimization and
+generalization, shedding light on the need for new algorithmic
+advances to overcome issues pertaining to the training speed,
+precision, and generalizability of today’s PINN models. Of
+particular interest are gradient-free evolutionary algorithms
+(EAs) for optimizing the uniquely complex loss landscapes
+arising in PINN training. Methods synergizing gradient
+descent and EAs for discovering bespoke neural architectures
+and balancing multiple terms in physics-informed learning
+objectives are positioned as important avenues for future
+research. Another exciting track is to cast EAs as a meta-
+learner of generalizable PINN models. To substantiate these
+proposed avenues, we further highlight results from recent
+literature to showcase the early success of such approaches
+in
+addressing
+the
+aforementioned
+challenges
+in
+PINN
+optimization and generalization.
+I. Introduction
+O
+ver the past decade, advances in deep learning
+have garnered increasing attention for their
+potential to address pressing challenges in sci-
+ence and engineering. The emerging topic of
+artiﬁcial intelligence (AI) for science promises to transform
+technological frontiers [1]. For example, learned models have
+shown the capacity to accelerate the design and discovery of
+novel materials, photonic devices, proteins, drugs, and renew-
+able energy technologies such as wind turbines. However,
+unlike conventional applications of AI in vision, speech, or
+natural language processing where there is a deluge of available
+data, applications in scientiﬁc domains are often characterized
+by extreme data scarcity. This has raised concerns regarding
+the veracity of such models when trained only on small data.
+The cost of acquiring quality data gives rise to a practical bot-
+tleneck, leading to naive statistical models which sometimes
+generate physically inconsistent outputs. These shortcomings
+become even more consequential in the context of Agentic AI
+systems [2], [3], [4], which are designed to autonomously drive
+scientiﬁc discovery and decision-making. In such systems, a
+lack of embedded physical understanding by models can lead
+to ﬂawed reasoning or unsafe actions when interfacing with
+the real world [5], [6].
+The shortcomings of standard data-driven models have
+seeded the ﬁeld of scientiﬁc machine learning where minimizing
+deviations from the known laws of nature serves to boost
+model precision and data efﬁciency [21], [22]. Associated
+methods offer unique pathways to rationalizable AI, deﬁned
+in [23], that is cognizant of fundamental physics principles. A
+myriad of approaches to instil physics consistency into learned
+models can be crafted, with the most suitable methods being
+naturally dependent on the task at hand and the type of
+knowledge available [24], [25], [26], [27]. Some instantiations
+include the design of model architectures that preserve invari-
+ances or symmetries representative of the underlying sys-
+tem [28], data augmentation with theory-based synthetic data
+(e.g., ﬁrst principles numerical simulations) [29], or introduc-
+tion of learning biases into the training process [30].
+This effort focuses on the growing body of literature on
+physics-informed neural networks (PINNs), popularized in recent
+years by the work of Raissi et al. [31]. The essential idea of a
+PINN—where mathematically-deﬁned learning biases are directly
+incorporated into a neural network’s loss function—is simultaneously
+decades old, with its earlier work in the 1990s [32], [33], and
+also a breath of fresh air for AI. This physics-informed loss is
+amenable to various forms of scientiﬁc knowledge and theo-
+ries, including conservation laws and/or governing equations
+in the form of ordinary and partial differential equations
+(ODEs and PDEs), yet retains immense ﬂexibility in the
+choice of network architectures (e.g., multilayer perceptron,
+convolutional or graph neural networks) and learning algo-
+rithms (e.g., gradient-based or gradient-free). This makes it
+possible for scientiﬁc knowledge uncovered over centuries,
+from the micro-scale evolution of quantum-mechanical sys-
+tems to the macro-scale behavior of solids, ﬂuids, and propaga-
+tion of electromagnetic ﬁelds, to be incorporated into the
+learned models of today, thereby compensating for a lack of
+labeled data.
+The potential of such physics-informed models has
+spawned signiﬁcant interest across various scientiﬁc domains.
+Trends from a Google Scholar search of the literature in the
+last six years (2019-2024) are depicted in Figure 1. The ﬁgure
+reveals rapid growth in the popularity of PINNs in different
+branches of science, with many demonstrations being devel-
+oped using open software libraries such as JAX [34], NVIDIA
+PhysicsNeMo [35], SciANN [36], and DeepXDE [37].
+Despite the broad applicability of PINNs (ref. to Table I
+for some potential applications), the switch from standard
+data-driven loss functions to physics-informed learning objec-
+tives has brought unforeseen difﬁculties in optimizing the lat-
+ter’s uniquely complex landscape [38], [39], [40]. These
+training difﬁculties undermine the theoretical advantages of
+PINNs, and are currently a barrier to their adoption in place
+of established numerical methods in science and engineering.
+Prior surveys [27], [41], [42], [43], [44], [45] review PINN
+methods, applications, limitations, trends, and prospects from
+interdisciplinary viewpoints, but a common point of emphasis
+is that efﬁcient optimization of PINNs remains an open
+problem [44].
+Separately, despite the physics-informed loss, the physical
+validity of a PINN is limited to scenarios encountered during
+training, even after a complicated training process. Most
+PINNs are designed to model a speciﬁc PDE instance, and
+model training can be highly sensitive to choice of architecture
+FEBRUARY 2026 | IEEE COMPUTATIONAL INTELLIGENCE MAGAZINE
+17
+Authorized licensed use limited to: UNIVERSITÄTSBIBLIOTHEK PADERBORN. Downloaded on October 12,2026 at 06:32:43 UTC from IEEE Xplore.  Restrictions apply. 
+
+
+and optimization hyperparameters. Consequently, reusing
+identical hyperparameter conﬁgurations to train new PINN
+models within the same PDE family often fails to produce sat-
+isfactory results. They do not inherently generalize learned
+physics to new scenarios beyond their training regime—e.g.,
+changing PDE parameters, initial conditions or boundary con-
+ditions—thereby continuing to suffer from generalizability
+issues similar to standard data-driven learning algorithms.
+In light of the above, this paper examines PINNs through
+the lens of their optimization and generalization challenges. As
+evidenced by Figure 1, there is a vast amount of innovative
+PINN literature, however, this paper speciﬁcally focuses on a
+curated subset that best illustrates both these optimization and
+generalization challenges, and the exciting opportunities for
+novel, targeted algorithms and methods. Notably, most PINN
+implementations today make use of gradient-based optimiza-
+tion algorithms. The ubiquity of the method may be attributed
+to inertia from the primacy of stochastic gradient descent
+(SGD) in conventional data-rich deep learning tasks. How-
+ever, SGD is no silver bullet. Relative to standard deep learn-
+ing, physics-informed loss functions are not only highly non-
+convex but also exhibit disparities in the magnitudes of back-
+propagated gradient signals between the data and physics loss
+terms (see Section III-A1). These issues lead to pathologies
+that hinder effective training [46], [47]. The resulting optimi-
+zation trajectory is littered with spurious minima, making it
+extremely challenging to ﬁnd globally optimum solutions that
+satisfy physics. There is a high chance for gradient descent to
+get trapped in a local minimum that fails to satisfy the requisite
+physics, a possibility discussed in greater detail in Section III.
+Figure 2 provides a schematic summary of some of the
+main computational challenges inhibiting the vision of phys-
+ics-informed machine learning towards AI for Science, and
+some corresponding proposed solutions. In Section IV, argu-
+ments are presented in support of our main claim: that
+algorithmic ideas developed over the years within the compu-
+tational intelligence community may be uniquely well-suited
+for physics-informed learning. Of particular interest are the
+gradient-free evolutionary algorithms (EAs) that suffer less
+from spurious local minima due to their exploration-oriented
+global search capacity [48], [49]. An associated research direc-
+tion is the synergy of EAs with gradient descent (in the spirit
+of memetic algorithms), thereby marrying the best of both
+worlds. While population-based EAs may be advantageous in
+navigating highly non-convex loss landscapes and balancing
+trade-offs between conﬂicting objectives, local search via gra-
+dient descent can facilitate rapid convergence to precise
+solutions.
+In addition to optimizing network parameters, EAs enable
+the discovery of bespoke architectures for physics-informed
+learning [50]. Evolutionary mechanisms could also prove use-
+ful for guiding training data generation in areas with higher
+errors on governing physics equations, having shown evidence
+of improved convergence to correct solutions [51]. Accurate
+solutions to novel PDEs can be rapidly obtained through evo-
+lutionary transfer optimization, leveraging multiple knowledge
+FIGURE 1 Google Scholar search of the literature shows the popularity of PINN over the years between 2019 and 2024, and PINN studies in
+diverse scientiﬁc areas. Data collected in November 2024.
+TABLE I Potential applications of PINNs across various
+scientiﬁc domains.
+BRANCH
+APPLICATIONS
+Fluid Mechanics
+Turbomachinery design [7], airfoil design [8]
+Solid Mechanics
+Topology optimization [9], [10], vehicle
+crashworthiness design [11], additive
+manufacturing [12], [13], digital twin [14], [15]
+Chemistry &
+Electrochemistry
+Battery management systems [16]
+Quantum & Particle
+Physics
+Diffuse optical tomography [17], nuclear
+fusion physics analysis [18], [19]
+Material Science
+Composite-tool systems during
+manufacture [20]
+18
+IEEE COMPUTATIONAL INTELLIGENCE MAGAZINE | FEBRUARY 2026
+Authorized licensed use limited to: UNIVERSITÄTSBIBLIOTHEK PADERBORN. Downloaded on October 12,2026 at 06:32:43 UTC from IEEE Xplore.  Restrictions apply. 
+
+
+sources during optimization for speciﬁc target tasks [48].
+Another exciting track is to cast EAs as a meta-learner of gen-
+eralizable PINN models [52]. This may be achieved through a
+bilevel formulation where an upper-level EA searches for
+PINN conﬁgurations that can be quickly ﬁne-tuned for vari-
+ous downstream physics tasks at the lower-level.
+The advancement of Evo-PINNs is expected to have far-
+reaching impact on establishing PINN methodologies at the
+forefront of scientiﬁc machine learning. However, there are
+only a handful of related works in the literature, implying
+huge scope for future research and development.
+II. Overview of PINN Methodologies
+PINNs are designed to learn a mapping between the input and
+output variables while satisfying speciﬁed mathematical con-
+straints that represent the physical phenomenon or dynamical
+process of interest [31]. Given their ubiquity in modern science
+and engineering, PDEs are one of the most studied physics pri-
+ors integrated in PINNs. Without loss of generality, we con-
+sider a physics-informed learning problem with input variables
+x (spatial dimension) and t (time dimension), and an output
+variable u, satisfying PDEs of the general form:
+PDE:
+N #½uðx; tÞ ¼ hðx; tÞ;
+x 2 V; t 2 ð0; T
+(1aÞ
+IC:
+uðx; t ¼ 0Þ ¼ u0ðxÞ;
+x 2 V
+(1bÞ
+BC:
+B½uðx; tÞ ¼ gðx; tÞ;
+x 2 @V; t 2 ð0; T
+(1cÞ
+where the general differential operator N #½uðx; tÞ contains
+PDE parameters # and can include linear and/or nonlinear
+combinations of temporal and spatial derivatives of u, and
+hðx; tÞ is an arbitrary source term in the domain x 2 V; t 2
+ð0; T. Equation (1b) speciﬁes the initial condition (IC), u0ðxÞ,
+at time t ¼ 0, and (1c) speciﬁes the boundary condition (BC)
+such that B½uðx; tÞ equates to gðx; tÞ at the domain boundary
+@V, where B½ can either be an identity operator (Dirichlet
+BC), a differential operator (Neumann BC), or a mixed iden-
+tity-differential operator (Robin BC).
+A. Physics-Informed Loss
+PINNs are distinct from DNNs in that additional physics pri-
+ors are incorporated as an essential component of its physics-
+informed loss function:
+LPINN ¼ physics Lphysics þ data Ldata;
+(2)
+where the relative weights physics and data control the compo-
+nent-wise trade-off. The physics-informed component can
+consist of multiple PDE-, IC-, and BC-based loss terms:
+Lphysics ¼ pde Lpde þ ic Lic þ bc Lbc
+(3aÞ
+Lpde ¼ kN #½f ð; wÞ  hðÞk2
+L2ðVð0;TÞ
+(3bÞ
+Lic ¼ kf ð; t ¼ 0; wÞ  u0ðÞk2
+L2ðVÞ
+(3cÞ
+Lbc ¼ kB½f ð; wÞ  gðÞk2
+L2ð@Vð0;TÞ
+(3d)
+where f ð; wÞ is the PINN output function with network
+parameters w, evaluated on a set of label-free training points
+(collocation points) sampled from the respective spatio-tempo-
+ral domain. An illustrative schematic of a PINN model is pre-
+sented in Figure 3. Evaluation of differential operators, e.g.,
+d f ð;wÞ
+dt
+, d f ð;wÞ
+dx
+, and d2f ð;wÞ
+dx2
+, are generally required for computa-
+tion of the physics-informed loss on these training samples.
+They can be conveniently computed by automatic differentia-
+tion [31] and/or numerical differentiation [53], [54] methods
+at any sample location.
+Fundamentally, PINNs arrive at an accurate and physics-
+compliant prediction for a desired physics scenario by forcing
+its outputs f ð; wÞ to satisfy
+(1) through minimizing the
+FIGURE 2 Boosting scientiﬁc ML with evolutionary optimization of physics-informed neural networks (Evo-PINN).
+FEBRUARY 2026 | IEEE COMPUTATIONAL INTELLIGENCE MAGAZINE
+19
+Authorized licensed use limited to: UNIVERSITÄTSBIBLIOTHEK PADERBORN. Downloaded on October 12,2026 at 06:32:43 UTC from IEEE Xplore.  Restrictions apply. 
+
+
+physics-informed loss (3). The effectiveness of the optimiza-
+tion of network parameters w through the physics-informed
+loss is a primary determinant of the accuracy of the PINN
+model. In contrast, the typical data-driven loss (as common in
+a DNN) computes the MSE between the model prediction
+f ðxi; ti; wÞ and available target ulabel
+i
+over i=1; . . .; n labeled
+samples:
+LDNN ¼ Ldata ¼ 1
+n
+X
+n
+i¼1
+ulabel
+i
+ f ðxi; ti; wÞ
+
+2
+(4)
+B. Physics-Informed Learning Advantages
+The advantages of physics-informed learning are demon-
+strated in Figure 4. Given only a few labeled data (n=5),
+a DNN model (with sufﬁcient representation capacity)
+remains unable to correctly reconstruct the entire system,
+although it ﬁts all training samples well. In contrast, a
+PINN model can accurately learn the solution from the
+same set of labeled data. By enforcing physics constraints
+on a set of label-free training samples (npde=1000) uniformly
+drawn from the computation domain utilizing the afore-
+mentioned PINN loss, a PINN can learn the solution even
+without any labeled data. The governing physics in this
+example is the convection-diffusion equation a du
+dx  d2 u
+dx2 ¼
+0 with PDE parameter a, a ubiquitous physics model that
+describes the distribution of a scalar quantity (e.g., mass,
+energy, temperature) in the presence of convective trans-
+port and diffusion [55].
+C. PINN for Scientiﬁc Simulation
+PDEs offer concise mathematical descriptions of diverse phys-
+ics phenomena in nature. With PINNs, it is possible to simu-
+late an entire physical system by training the model to
+approximate the solution of the PDEs speciﬁc to the target
+FIGURE 3 PINN handles both scientiﬁc simulation and scientiﬁc discovery. Example applications are: 1) accurate simulation of transient
+vortex shedding behind a cylinder obtained by learning a PINN for a single problem solely using the governing physics (2D transient N-S
+equations); and 2) inference of the wave propagation speed, c, given sparse observations (locations demarcated by ), by learning an
+inference PINN model with a partially speciﬁed 1D transient wave equation.
+FIGURE 4 Illustrative example showing how a PINN model can
+make accurate prediction by learning with physics laws (1D
+convection-diffusion equation) and few labeled data, whereas a
+conventional DNN model fails to learn the correct output.
+20
+IEEE COMPUTATIONAL INTELLIGENCE MAGAZINE | FEBRUARY 2026
+Authorized licensed use limited to: UNIVERSITÄTSBIBLIOTHEK PADERBORN. Downloaded on October 12,2026 at 06:32:43 UTC from IEEE Xplore.  Restrictions apply. 
+
+
+physics, without any labeled data (i.e., solely using the physics-
+informed loss). A good example of this is the ﬂuid dynamic
+simulation of vortex shedding behind a cylinder depicted in
+Figure 3, which was obtained by using a PINN to solve the
+transient 2D Navier-Stokes (N-S) equations [56].
+Compared to classical numerical solvers employing the
+ﬁnite difference, ﬁnite element, or ﬁnite volume method [57],
+PINNs have the signiﬁcant advantage of being mesh-free.
+Meshing, which is the process of domain discretization, is an
+essential, yet non-trivial task in classical numerical methods.
+Numerical methods can fail to ﬁnd the correct solution if the
+meshing is not appropriately done. On the other hand, PINNs
+can provide a solution without similar mesh requirements.
+Additionally, the solution obtained through PINN is differen-
+tiable, and its compact representation requires lower memory
+demand for storage. This makes PINNs a promising alternative
+to traditional numerical methods for simulating physics phe-
+nomena; an extensive review is presented in [41].
+While most PINN studies address a single physics problem,
+a PINN model can also incorporate additional input parame-
+ters, such as geometry, Reynolds number, or material
+properties [58], [59], [60]. These models, also referred to as
+parameterized PINN, can then provide predictions across a set
+of physics scenarios, rather than just one.
+D. PINN for Scientiﬁc Discovery
+In addition to directly simulating physical behavior, PINNs
+can be seamlessly extended to various hypothesis inference
+problems common in scientiﬁc discovery. These problems
+typically involve an incomplete and potentially noisy set of
+observed data points, and the goal is to infer information about
+the system through optimizing the hypothesis space. The loss
+function used consists of both physics-informed (to capture
+relevant physics) and data (observations) components (2). The
+hypothesis spaces of the inference problem are included as
+optimization variables along with the network parameters dur-
+ing training; see example in Figure 3.
+The PINN models are uniquely suited for hypothesis
+inference when compared to numerical solvers and can
+effectively synergize theory and observation data from vari-
+ous sources such as sensors and imaging, even for ill-posed
+PDE problems. It can be combined with probabilistic infer-
+ence methods (e.g., Bayesian-PINN [61]), with the proba-
+bilistic framework offering a mathematical tool to handle
+uncertainties arising from both noisy data and physics
+assumptions [61], [62].
+In current literature, PINN models have been applied to:
+1) Inference of system-level parameters such as the underlying
+governing equations, constitutive relationships or system
+parameters (e.g., Reynolds number, wave speed) based on
+observations [63], [64], [65], [66], [67]. 2) Inference of unobserved
+ﬁeld variables across the entire domain based on limited observa-
+tions, e.g., predicting pressure from velocity in particle imag-
+ing velocimetry [68]. Many have employed PINNs towards
+the inference of domain ﬁeld variables in various problems
+spanning ﬂuid dynamics [69], heat transfer [70], and biomedi-
+cal sciences [71], [72]. 3) PDE-constrained design optimization
+towards a set of desired (observation) outcomes. The PINN is
+used as an adjoint optimizer, enabling the design parameters to
+be optimized towards the desired outcome while fulﬁlling all
+speciﬁed relevant physics during training. This has been suc-
+cessfully demonstrated on topology optimization [73] and
+metamaterial [74] design problems.
+III. Optimization and Generalization Challenges
+However, PINN’s advantages come at the cost of increased
+difﬁculty in optimizing PINN model parameters, with many
+early papers showing long training times and limited predictive
+performance on more complex problems [31], [38], [39], [40].
+Unsuccessful PINN training (premature convergence) can
+lead to unacceptable (unphysical) simulation outcomes. More-
+over, parameterized PINNs can still face issues with generaliz-
+ability since the accuracy of interpolation-based predictions on
+a new problem is not guaranteed, and training a well-general-
+izable PINN model may not be an easy task. In this section,
+we shed light on some contributing factors to the optimization
+and generalization challenges—two pre-dominant hurdles to
+the wide-spread adoption of PINNs in real-world applications
+today—and how they may originate from fundamental limita-
+tions in gradient-based approaches.
+A. Challenges in Optimizing PINN Models
+In many studies involving PINN, it was observed that the
+training iterations required for convergence far exceed those
+needed for typical data-driven DNN. We relate the optimiza-
+tion difﬁculty of PINNs to a few factors below.
+1)Complex Loss Landscape
+The physics-informed loss usually consists of multiple PDE
+and IC/BC loss terms (3), each with distinct scales and charac-
+teristics during PINN training. For instance, the scale of PDE
+loss can span several orders of magnitude depending on the
+underlying differential operators and the complexity of the
+solution, and this range is only revealed during training. Addi-
+tionally, some loss terms change more dramatically than others
+during training, as shown by prior analyses through the lens of
+neural tangent kernel (NTK) [75], [76]. These characteristics
+make the proper scaling of different loss terms challenging.
+In addition, the PINN optimization landscapes are littered
+with spurious minima and are more complex than those of
+usual data-driven DNN models. Figure 5 illustrates the loss
+landscapes of PINN and DNN models for the convection-dif-
+fusion problem presented in Section II-B. To investigate the
+topological differences in their loss landscapes, we ﬁrst com-
+puted the Hessians of their respective loss functions (i.e.,
+LPINN or LDNN) with respect to the model parameters: H ¼
+r2 LðwÞ. We then extracted the leading two eigenvectors
+and eigenvalues of the Hessian (i.e., ﬁrst two principal Hessian
+directions) which correspond to the directions of highest
+FEBRUARY 2026 | IEEE COMPUTATIONAL INTELLIGENCE MAGAZINE
+21
+Authorized licensed use limited to: UNIVERSITÄTSBIBLIOTHEK PADERBORN. Downloaded on October 12,2026 at 06:32:43 UTC from IEEE Xplore.  Restrictions apply. 
+
+
+curvature in the loss landscape. By perturbing the trained
+models along these dominant eigenvectors and evaluating the
+resulting loss values, we can obtain a more informative charac-
+terization of the local topology than perturbing the model
+parameters in random directions [38]. This visualization pro-
+vides evidence of a much higher degree of complexity and
+ruggedness of the loss landscape for PINN compared to usual
+data-driven DNN models. The smoothness of the latter is con-
+ducive to gradient-based algorithms that can easily ﬁnd descent
+paths from the point of initialization to a good local optimum
+that ﬁts the training data well. This outcome corroborates the
+primacy of SGD and its variants in today’s deep learning tasks.
+In contrast, the contradictory descent directions from different
+loss terms encountered during PINN training can adversely
+impact optimization [77], [78]. It is worth noting that when
+the loss terms are purely physics-based (e.g., PDE and IC/
+BC), they are not theoretically contradictory. However, dur-
+ing the optimization process, especially when the solution is
+still far from the true optimum, the local gradient directions of
+these loss components can still become practically conﬂicting.
+This issue arises due to the combined effects of neural network
+expressivity, the structure of the loss landscape (e.g., scales and
+convergence dynamics), and the limitations of optimizers,
+which can cause certain objectives to dominate or suppress
+others during early or intermediate stages of training.
+Although these powerful gradient-based algorithms are
+inseparable from the recent success of deep learning, they are
+no silver bullet. For instance, gradient-based methods are sus-
+ceptible to being trapped in spurious local minima, which is
+often the case in the context of PINN optimization. Typical
+deep learning applications do not require a fully converged
+solution, as they prioritize generalization performance over
+training precision. However, this is not the case for PINNs,
+where reaching the global minimum is essential to ensure the
+model’s ﬁdelity to the underlying physics. A small violation of
+the PDE constraints can result in an unphysical PINN solution
+while a small violation of the BC or IC constraints corresponds
+to an entirely different PDE problem [79], [80].
+2)Initial Local Minimum Trap and Spectral Bias
+PINN models employing standard activation functions
+(such as tanh, sigmoid) when initialized using common tech-
+niques (such as the Xavier method) tend to produce ﬂat
+output functions at initialization, making them immediately
+susceptible to a local minimum trap whereby the PINN
+loss already sees a minimized PDE loss term. This theoreti-
+cal insight, discussed in [81], [82], [83], applies across a
+range of physics scenarios where the underlying PDE is
+trivially satisﬁed by ﬂat functions. A strong bias around ﬂat
+functions can therefore be difﬁcult for gradient descent to
+escape, especially when the true solution, that must simul-
+taneously minimize all PDE and IC/BC loss terms, is not
+accessible near the point of initialization.
+Another closely related issue stems from the known satura-
+tion property of activation functions commonly used for
+PINN. Such saturation property can cause backpropagated
+gradients to vanish whenever the network weights are shifted
+towards a larger distribution, as driven by the need to approxi-
+mate higher frequencies and steep gradients common in phys-
+ics. This makes further gradient descent of the network
+weights difﬁcult, adversely causing a learning bias towards
+smooth functions (lower frequencies are learned better than
+FIGURE 5 The plots contrast the local loss landscapes of PINN and DNN, for the convection-diffusion problem presented in Section II-B. After
+100,000 training iterations, we project their corresponding loss values onto the plane spanned by the ﬁrst two principal Hessian directions as
+per previously reported literature [38] to get an intuition for the loss landscape.
+22
+IEEE COMPUTATIONAL INTELLIGENCE MAGAZINE | FEBRUARY 2026
+Authorized licensed use limited to: UNIVERSITÄTSBIBLIOTHEK PADERBORN. Downloaded on October 12,2026 at 06:32:43 UTC from IEEE Xplore.  Restrictions apply. 
+
+
+higher frequencies). This known tendency—also called spectral
+bias—has been studied through the lens of NTK [84], [85],
+revealing a signiﬁcant discrepancy in convergence rates for dif-
+ferent frequency components in the output during training.
+While this has been regarded as a natural regularizer with
+potential beneﬁts to the generalization performance of DNNs,
+the consequences are highly deleterious for PINNs. Spectral
+bias makes it difﬁcult for PINNs to accurately learn complex
+nonlinear physics behaviors [86], e.g., in the vicinity of steep
+gradients characterizing shock waves. These local discrepancies
+further deter propagation of the correct initial and boundary
+conditions into the computation domain, which has been sug-
+gested to be critical for successful PINN training [80], [87].
+This saturation also translates to increased difﬁculties for
+gradient-based algorithms to alter the behavior of PINN
+output far away from the input origin. As a result, PINN
+struggles to learn over long time horizons, partly because
+the learning bias towards smooth functions can cause the
+gradient descent to prematurely converge to a trivial solu-
+tion (satisfying the PDE) before the initial and boundary
+conditions can properly propagate to a later time [88]. An
+associated tendency for gradient-based PINN training to be
+drawn towards unstable ﬁxed point solutions of dynamical
+systems was analyzed in [89], with experiments suggesting
+that they form strong basins of attraction in the PINN loss
+landscape.
+3) Sensitivity to Sample Size and Location
+The training samples of the PINN model are typically uni-
+formly drawn from the input domain and are equally
+important everywhere due to their physical correspondence
+with the spatio-temporal extent of the problem. While the
+use of mini-batch samples is a standard procedure in gradi-
+ent-based training, it remains an open question how one
+can efﬁciently reduce the batch size (and hence the training
+cost) while maintaining the desired PINN model accu-
+racy [90]. Using a large batch size is crucial for the accuracy
+of PINNs due to the potential need to learn high frequen-
+cies or complex structures in the a priori unknown target
+function [91]. However, this inevitably increases training
+costs. Furthermore, oversampling on a high loss region may
+adversely slow convergence since it can be harder to learn
+such local complex gradient behaviour—a cause of stiffness
+during training [39], [40], [54]. On the other hand, an
+overly small batch size will result in noisy (big jump in loss
+values) and inconsistent local gradient signals [92], thereby
+causing issues during gradient descent.
+4) Current Research Directions
+Since the seminal work of Raissi et al. [31], architecture
+design and training methods for PINNs have continued to
+evolve.
+Recent
+advancements
+often
+combine
+multiple
+learning strategies to tackle the aforementioned PINN opti-
+mization issues [93], [94], [95]. Curriculum learning improves
+convergence by initiating training on a better-conditioned,
+simpler version of the original problem and then systemati-
+cally advancing to target problem [38]. Physics-informed
+learning often succumbs to premature convergence for chal-
+lenging problems, however, the same PDE equation with
+altered parameters or IC/BCs may be a simpler problem. In
+this scenario, one can start training the PINN model on the
+easier problem and then gradually vary the problem during
+training to approach the target problem. This approach
+assumes that each training step brings the model closer to
+the optimal solution of the next (harder) problem, thereby
+improving the next round of training. Hence, curriculum
+learning can be viewed as an initialization process to guide
+the model toward the desired solution utilizing a priori
+understanding of how the system behaves as its problem
+parameters change. Adaptive loss-balancing strategy can also be
+considered as a form of curriculum learning, where the
+training is initiated with the loss weights corresponding to a
+simpler optimization problem. It involves assigning appro-
+priate weights to balance different terms in the PINN loss
+functions [47], [75], [76], [77], [78], and is regarded as an
+important technique to improve convergence.
+Recent studies have proposed enhancements to PINN
+learning by leveraging network architectures that incorpo-
+rate Fourier feature embeddings, skip connections, and ran-
+dom weight factorization [93], [94], [95]. PINNs with skip
+connections and periodic activation functions retain a
+greater proportion of gradients during backpropagation
+from output to input, thereby mitigating spectral bias caused
+by activation saturation [81], [83], [96]. Adaptive techniques
+that adjust the slope of activation functions have also been
+introduced to further control saturation and enhance train-
+ing efﬁciency [97], [98]. These methods embed inductive
+biases—such as high-frequency behavior characteristic of
+certain PDEs—directly into the network architecture. Addi-
+tionally, physics-informed cell representations have been
+developed to address spectral bias away from the input ori-
+gin by disentangling network parameters from the input
+coordinates [99]. Convolutional architectures also achieve
+this parameter-input decoupling, allowing for larger, more
+expressive networks that scale effectively to complex, large-
+scale problems [58].
+Some studies have proposed using numerical differentia-
+tion (ND)-based methods for the differential operators in the
+physics-informed loss, with ND being potentially cheaper to
+compute relative to automatic differentiation [53], [54]. More
+importantly, ND is more robust to sample density and poten-
+tially advantageous in the context of reducing sample require-
+ment in establishing a strong correlation between physics-
+informed loss and model accuracy. This is because ND meth-
+ods, by deﬁnition, use Taylor series expansion (TSE) to con-
+struct a low-order local approximation for the derivative terms.
+They can provide structural biases and discourage extreme gra-
+dients to reduce overﬁtting to better learn the approximate
+solution [53]. They can also connect neighboring samples and
+FEBRUARY 2026 | IEEE COMPUTATIONAL INTELLIGENCE MAGAZINE
+23
+Authorized licensed use limited to: UNIVERSITÄTSBIBLIOTHEK PADERBORN. Downloaded on October 12,2026 at 06:32:43 UTC from IEEE Xplore.  Restrictions apply. 
+
+
+facilitate the propagation of information from the IC/BC to
+interior sample points, thereby reducing any tendency to over-
+ﬁt especially near boundaries [54].
+B. Challenges in Learning Generalizable PINN Model
+Given both simulation (hypothesis evaluation) and inference
+capabilities, PINNs are versatile and can be applied to various
+applications common in science such as model-predictive-
+control, scenario planning, and design exploration [100],
+[101], [102], [103]; see Figure 6. The commonality to these
+applications is the need for multiple accurate and physics-com-
+pliant predictions across a series of related problems. These
+repeated evaluations usually differ by modiﬁcations to the
+physics scenario such as changes in geometric shape, PDE
+parameter, IC, and BC.
+1) How Generalizable Is A PINN Model?
+Most parameterized PINN models (ref. to Section II-C; they
+are designed to learn a parametric family of physics scenarios)
+make predictions on new scenarios unseen during training
+through interpolation. This interpolation is usually physics-
+agnostic, with similar negative implications for generalizability
+as predictions from typical DNNs [52]. Consequently, the
+effectiveness of parameterized PINNs depends signiﬁcantly on
+problem complexity. Given the difﬁculties in optimizing a
+PINN model for a single scenario, the cost of performing
+physics-informed learning across a set of scenarios can be pro-
+hibitive [104]. Moreover, the problem’s parameterization
+needs to be determined at the learning stage, which reduces
+the ﬂexibility of the parameterized PINN model when applied
+to new physics scenarios.
+2) How to Train A Generalizable PINN Model in The
+Data-Scarce Regime?
+Meta-learning approaches provide a systematic framework for
+discovering good weight initializations that can be quickly
+adapted—with minimal training—to new scenarios (tasks) in a
+problem distribution. Hence, meta-learning of a generic
+PINN model initialization can similarly accelerate physically
+precise predictions across diverse, multi-modal problem distri-
+butions, and holds immense promise for addressing generaliza-
+tion challenge of PINN [104], [105], [106], [107], [108],
+[109], [110], [111], [112].
+There are still a number of unresolved issues in meta-learn-
+ing of a generalizable PINN model. Recent PINN studies
+showed inferior results for model-agnostic meta-learning
+(MAML), potentially due to insufﬁcient task-speciﬁc adapta-
+tion and non-convergence in the meta-learning algorithm’s
+outer loop optimization [109], [110]. A fundamental assump-
+tion of popular gradient-based meta-learning algorithms—
+such as MAML [113] and its variant, Reptile [114]—is that the
+models can learn well on each task after a few gradient descent
+updates from the initialization. However, this is not the case
+for PINNs because physics-informed losses are much more
+challenging to optimize and require extensive training [104].
+With only a handful of task-speciﬁc gradient descent updates,
+gradient-based meta-learning algorithms may remain suscepti-
+ble to local minima from noisy or even deceptive gradients.
+IV. Evo-PINN: Physics-Informed Learning With
+Evolutionary Algorithms
+Despite their theoretical advantage in diverse scientiﬁc
+domains, Section III has highlighted several practical chal-
+lenges in today’s PINN learning and optimization. The cost of
+optimization, navigating spectral bias and local minima traps,
+has even seeded a sense of pessimism among computational
+scientists about the utility of these techniques over standard
+numerical methods [115], [116]. In this section, we present
+our hypothesis that many algorithmic ideas developed in the
+computational
+intelligence
+community
+may
+in
+fact
+be
+uniquely well positioned to tackle the issues plaguing PINNs.
+One exciting research direction is to achieve physics-informed
+learning by synergizing evolutionary algorithms with local
+gradient descent signals, thereby leveraging the best of
+both worlds to quickly arrive at physically accurate and
+FIGURE 6 Example of a PINN learned to simulate a distribution of physical scenarios with a priori unknown input conditions in a what-if analysis: ball
+projectiles with different physical properties and initial conditions (launch angle and launch speed).
+24
+IEEE COMPUTATIONAL INTELLIGENCE MAGAZINE | FEBRUARY 2026
+Authorized licensed use limited to: UNIVERSITÄTSBIBLIOTHEK PADERBORN. Downloaded on October 12,2026 at 06:32:43 UTC from IEEE Xplore.  Restrictions apply. 
+
+
+generalizable PINN models. In what follows, we examine this
+and other promising algorithmic directions that we believe to
+warrant sustained investigation. These directions highlight key
+opportunities for the evolutionary optimization of PINNs
+(Evo-PINNs) to advance scientiﬁc machine learning.
+A. Exploration-Oriented Evolutionary Algorithms for
+Tackling PINN Optimization Challenges
+1) Neuroevolution Can Avoid Local Minima Traps
+In looking at a PINN’s unique optimization challenges, the
+need for new algorithms to overcome local minima traps
+caused by ﬂat outputs at initialization, or by the attractive-
+ness of unstable ﬁxed point solutions to dynamical systems,
+becomes apparent. Gradient descent is a point-based opti-
+mization method that is highly sensitive to the issues of
+local minima or learning bias magniﬁed by PINN loss
+functions. In contrast, in silico evolutionary computation
+offers a class of highly parallelizable approaches for guiding
+populations of candidate solutions towards globally-optimal
+regions of a search space via randomized mechanisms
+inspired by biological evolution [117]. We broadly refer to
+any such algorithmic realization as an evolutionary algorithm
+(EA) and its application to the training of neural networks
+as neuroevolution.
+The operators of EAs are typically based on principles of
+natural selection. They do not require derivative computa-
+tions of the loss function to be optimized and are therefore
+gradient-free. Importantly, as population-based methods,
+the implicit parallelism of EAs implies that they have lesser
+tendency to get trapped in a single local minimum [49],
+[118]. What is more, since their search is typically invariant
+to
+order-preserving
+transformations
+of
+the
+loss
+func-
+tion [119], EAs are less susceptible to ﬂat output functions
+with small (vanishing) gradients. For these reasons, they are
+deemed as potential alternatives to SGD, particularly in the
+context of scientiﬁc machine learning where the goal is to
+converge to physically precise solutions represented by
+global optima with zero PINN loss [48]. In addition to its
+global search capacity, an evolved population naturally pro-
+vides an ensemble of neural networks that affords the possi-
+bility
+of
+accurate
+predictions
+with
+robust
+uncertainty
+quantiﬁcation—as was shown through the application of a
+swarm-based evolutionary procedure to PINN optimiza-
+tion [120], [121]. The ability to provide uncertainty quanti-
+ﬁcation and probabilistic forecasts is crucial for scientiﬁc
+modelling and control problems [122].
+2) Pareto Optimization Balances Physics and Data Losses
+The existence of multiple loss terms—see (2) and (3)—makes
+PINN training intrinsically a multi-objective optimization
+problem. Since the terms Ldata; Lpde; Lic, and Lbc represent dif-
+ferent physical quantities, their magnitudes may be incom-
+mensurable. In this case, the role of the scalarizing weights is
+not only to express preferences between the losses, but also to
+compensate for differences in their magnitudes. While a per-
+fect physics solution would, in theory, simultaneously satisfy
+all PINN loss terms, the expressive capacity of a neural net-
+work is always limited by its (necessarily) ﬁnite size in practice.
+As argued in [89], [123], capacity limitations naturally give rise
+to conﬂicts and trade-offs between loss terms. This, in con-
+junction with the extreme ruggedness of the physics-informed
+learning objective, implies that a neural network, despite being
+a theoretical universal function approximator, is not guaran-
+teed to ﬁnd a solution that simultaneously minimizes all the
+terms [46]. When data-driven terms are also included, such as
+observational data or empirical measurements, true contradic-
+tions may arise as the data may be noisy, incomplete, or gov-
+erned by partially unknown physics that differs from the
+modeled equations. In such cases, the multi-objective optimi-
+zation
+must
+reconcile
+inherently
+conﬂicting
+objectives
+between data ﬁtting and physics adherence. Identifying an
+appropriate aggregation of objectives to arrive at good (physi-
+cally satisfactory) trade-off solution is also non-trivial [124].
+Moreover, the shape of the Pareto front formed by the multi-
+ple objectives is not known beforehand [125], with simple
+weighted-sum aggregations being insufﬁcient to support all
+parts of non-convex fronts [126].
+Multi-objective
+EAs
+(MOEAs)
+are
+tailor-made
+to
+address these issues [127]. In particular, Pareto dominance-
+based variants of MOEAs [128] do not require the multiple
+loss terms to be scalarized, and hence are less sensitive to
+incommensurable objectives. Their population-based search
+mechanisms also allow for free-form convergence towards
+the entire Pareto front in a single run of the algorithm, irre-
+spective of the front’s shape. These salient features have nat-
+urally begun to attract the attention of PINN researchers,
+although associated developments are still at a nascent stage.
+In [129], the non-dominated sorting genetic algorithm [130]
+was hybridized with a variant of SGD (namely, Adam [131])
+for training the parameters of a PINN. The exploration
+capacity of the EA was shown to help overcome local min-
+ima and enable precise satisfaction of the initial and bound-
+ary conditions encoded in the physics-informed loss. Given
+the computational cost of a hybrid framework, a pure popu-
+lation-based multi-objective search algorithm was studied
+for PINN training in [121], leading to calibrated uncertainty
+quantiﬁcation by examining the empirical distribution of
+the ensemble’s predictions.
+In addition to using MOEAs for PINN parameter training,
+there have been efforts towards evolving the model’s hyper-
+parameters (including the scalarizing weights and activation
+functions). The method yields a Pareto set of hyperparameters
+where each setting offers an optimal trade-off between the
+data and physics losses. Practitioners can then decide post-hoc
+which setting they wish to pursue [132]. An analysis of such
+post-hoc decision-making reveals that solutions close to the
+convex bulge of the Pareto front typically lead to performant
+PINNs [124]. Evolutionary algorithmists will immediately
+notice a connection between this observation and the
+FEBRUARY 2026 | IEEE COMPUTATIONAL INTELLIGENCE MAGAZINE
+25
+Authorized licensed use limited to: UNIVERSITÄTSBIBLIOTHEK PADERBORN. Downloaded on October 12,2026 at 06:32:43 UTC from IEEE Xplore.  Restrictions apply. 
+
+
+literature on knee-point driven MOEAs [133], which could
+serve as a valuable resource for hyperparameter tuning in
+PINNs.
+3) Memetic Algorithms Can Navigate Complex PINN
+Landscapes
+There is a clear theoretical rationale supporting Evo-PINNs,
+yet there are only a handful of related works in the literature.
+A barrier to the widespread use of EAs has been their high
+sample complexity, a consequence of updating and evaluating
+populations of solutions over multiple iterations. It is useful to
+consider hybridizing global evolutionary search with local gra-
+dient signals—thus inheriting the merits of both approaches.
+While the former can serve as an efﬁcient basin-hopper for
+exploring rugged PINN landscapes, the latter facilitates rapid
+convergence to stationary points by exploiting local derivative
+information of loss functions.
+There exists a long history of research in evolutionary
+computation studying synergies of this kind, with adaptive
+memetic algorithms forming a class of methods tailored for this
+purpose [134]. In the deep learning literature, gradient-guided
+evolutionary approaches have been designed for training neu-
+ral networks [135], [136], with Cui et al. [137] proving a sim-
+ple theorem that
+the performance
+of an evolutionary
+stochastic gradient descent method with elitist selection strat-
+egy never degrades with increasing iterations. However, to the
+best of our knowledge, there is no comparable body of work
+for PINN. Davi and Braga-Neto [120] demonstrated that
+combining a swarm optimization algorithm (a population-
+based method like EAs) with gradient descent could produce
+an ensemble of PINN models that out-performed pure gradi-
+ent-based learning. This result illuminates unexplored avenues
+for unifying SGD with gradient-free EAs as complementary
+algorithms within a single framework for ﬁnding globally opti-
+mum PINNs.
+The crafting of synergistic optimization frameworks
+that meld gradient-based and gradient-free methods, how-
+ever, remains challenging—particularly in identifying inter-
+action mechanisms that effectively harness the strengths of
+both approaches. Key questions to address include balanc-
+ing
+the
+intensity
+of
+SGD
+versus
+EAs,
+ascertaining
+when gradient descent should take over from evolution,
+or selecting an appropriate subset of the evolving popula-
+tion for ﬁne-tuning with gradient descent (as doing so
+for the entire population would be too expensive). Nota-
+bly, the subﬁeld of memetic computation—where memes
+are loosely deﬁned as computationally-encoded units of
+task-speciﬁc
+information
+(e.g.,
+local
+gradient
+signals)
+combined
+with
+global
+evolutionary
+search—offers
+a
+wealth of theories and methodologies that tackle these
+issues [138], [139].
+4)Implementation Considerations and Hardware
+Acceleration
+While population-based EAs offer search dynamics that
+complement point-based gradient descent, it is important
+to recognize that current algorithms may not yet provide
+an “off-the-shelf” solution for PINN optimization. Indeed,
+a recent study based on exploratory landscape analysis
+shows that the features of optimization benchmarks typi-
+cally used in the development of EAs fundamentally differ
+from those of neural network training tasks [140]. Excel-
+ling at benchmarks does not, therefore, ensure effectiveness
+in neuroevolution. Although such in-depth analysis in the
+speciﬁc context of PINNs is so far unavailable, an empiri-
+cal comparison of various evolution strategies (ES) by Sung
+et al. [141] shows that the performance of the classical
+CMA-ES [142] is statistically similar to or better than
+modern variants of natural ES algorithms [143] as well as
+SGD, across a range of PINN tasks representing real-world
+phenomena in classical mechanics, heat and mass transfer,
+ﬂuid dynamics, and wave propagation. A compelling rea-
+son to consider ES is the induced Gaussian-smoothing of
+loss functions, biasing ﬂat minima that often depict better
+generalization performance as per the minimum description
+length principle [144]. All algorithms tested in [141] were
+implemented in the JAX framework [145], providing
+orders of magnitude faster convergence than standard
+implementations. The source code has been made publicly
+available1 to facilitate deeper analysis and development of
+customized EAs for PINNs.
+Not only is there a plethora of EAs to choose from,
+effective application of an EA to any problem also involves
+careful tuning of numerous hyperparameters (e.g., learning
+step-size, population size, crossover rates). Interestingly, the
+theory of information-geometric optimization (IGO) [119]
+provides a mathematical uniﬁcation of probabilistic model-
+based EAs—including CMA-ES, natural
+ES, OpenAI-
+ES [146], or techniques that replace the Gaussian model
+with a deep generative model [147]—such that even a
+complete EA can be thought of as just a speciﬁc hyper-
+parameter setting of the general IGO update rule. Empiri-
+cal comparisons of optimizers suggest that more general
+update rules, if appropriately conﬁgured, should not under-
+perform the ones they can approximate [148]. It is there-
+fore fortunate that there exists a valuable body of literature
+on
+the
+automatic
+hyperparameter
+conﬁguration
+of
+EAs [149] that could be leveraged for PINN optimization
+problems of varying scales and characteristics. Examples
+It is useful to consider hybridizing
+global evolutionary search with local
+gradient signals—thus inheriting the
+merits of both approaches.
+1Python source codes for neuro-evolving PINN using EvoJAX are [Online].
+Available: https://github.com/nicholassung97/Neuroevolution-of-PINNs.
+26
+IEEE COMPUTATIONAL INTELLIGENCE MAGAZINE | FEBRUARY 2026
+Authorized licensed use limited to: UNIVERSITÄTSBIBLIOTHEK PADERBORN. Downloaded on October 12,2026 at 06:32:43 UTC from IEEE Xplore.  Restrictions apply. 
+
+
+include but are not limited to adaptive population siz-
+ing [150] and reinforcement learning for online control of
+learning step-sizes [151] or crossover rates [149].
+Another major challenge in the application of EAs is
+that they may scale poorly with the dimensionality of the
+optimized parameters. This number can indeed grow large
+for deep neural networks, and theoretical analysis suggests
+that the required number of optimization steps scales
+linearly with dimensions for general non-smooth functions
+[152]. However, OpenAI’s seminal paper on ES [146]
+prominently demonstrates that, in practice, these algorithms
+effectively exploit key informative dimensions of the opti-
+mization problem. This allows their performance to scale
+with the (low) intrinsic dimensionality of the task, rather
+than with the full dimensionality of the search space. This
+observation has been supported by recent work as well [5],
+positioning ES as a scalable option for training large PINNs
+given the availability of distributed hardware on which
+population evaluations can be parallelized. For tasks where
+the intrinsic dimensionality remains high, the latest meth-
+ods of problem decomposition, cooperative coevolution,
+and memetic algorithms are worthy of exploration [153],
+though these have yet to be investigated in the context of
+PINNs.
+B. Neural Architecture Search for Inducing Physics Biases
+The
+choice
+of
+architectures
+and
+hyperparameters
+for
+PINNs has often been guided by experiential priors drawn
+from standard deep learning. However, a growing body of
+literature shows that accurate physics-informed learning
+may call for bespoke architectures. For example, contrary
+to popular belief, more hidden layers do not necessarily
+mean better performance and can sometimes be detrimen-
+tal. An automated neural architecture search via a bilevel
+programming formulation revealed that, for certain govern-
+ing differential equations, a shallow neural network with
+many neurons was more suitable for PINNs [154]. Similar
+intriguing insights regarding the choice of activation func-
+tion have also been uncovered. While squashing functions
+(e.g., tanh and sigmoid) and variants of the rectiﬁed linear
+unit are the mainstay in the deep learning literature, the
+use of Fourier features (i.e., sine and cosine) has gained
+prominence in physics tasks [81], [83], speciﬁcally for their
+ability to overcome spectral bias and capture periodic or
+high frequency patterns (e.g., shock fronts) common in
+various physics applications [155], [156], [157].
+Given the large number of design choices for network
+architectures and hyperparameters, manual experimentation
+to identify an optimal design for every physical problem is
+impractical. Notably, there exists a rich history of research
+in neuroevolution that automates such design choices
+through the joint evolution of neural network topologies
+along with their parameters [158], [159]. One such example
+of the fully automatic design of PINNs by a genetic algo-
+rithm
+with
+specially
+tailored
+selection,
+crossover,
+and
+mutation operators was proposed in [50]. Each chromosome
+of this method encodes a learning algorithm, architecture of
+the PINN model, activation function in the hidden layers,
+and the output activation. In a related approach, an asyn-
+chronous genetic algorithm that alternates between model
+selection and optimization of physics-informed neural state
+space dynamics models was presented in [160]. Daw
+et al. [87] proposed an evolutionary sampling procedure to
+incrementally accumulate sample points in regions of high
+PDE residuals for mitigating training failures.
+In order to achieve higher approximation accuracy and
+faster convergence rates, an EA for concurrently exploring
+optimal shortcut connections between PINN layers and novel
+parametric activation functions expressed by binary trees was
+put forward in [161]. Interestingly, numerical studies show
+that random projection PINNs—where most network param-
+eters are randomly initialized and ﬁxed, with training limited
+to the output layer—signiﬁcantly accelerate training on phys-
+ics-informed learning objectives [162]. However, ensuring
+predictive accuracy in this setting requires careful conﬁgura-
+tion of the randomization bandwidth: a hyperparameter deﬁn-
+ing the width of the probability distribution from which the
+random parameters are sampled. In [163], this hyperparameter
+optimization was carried out by the differential evolution algo-
+rithm [164], resulting in PINNs that outperformed higher-
+order ﬁnite element methods (an established numerical
+method for solving differential equations) in terms of speed
+and accuracy.
+Training a PINN model can be computationally inten-
+sive, rendering the evaluation of hyperparameters or net-
+work architectures prohibitively expensive. To address this
+problem, various surrogate-assisted evolutionary techni-
+ques [165] have been proposed within the ﬁeld of evolu-
+tionary computing, emerging as promising solutions. These
+techniques encompass a wide range of optimization scenar-
+ios, including single-objective [166], multi-objective [167],
+large-scale [168], constrained [169], discrete variable [170],
+and even mixed-variable optimization [171]. These techni-
+ques provide a strong foundation for developing more efﬁ-
+cient hyperparameter optimization and architecture search
+methods tailored to PINNs.
+C. Transfer Optimization for Accelerated PINN Training
+1)Learning From Related Tasks
+In a scientiﬁc study, it is common for a single set of PDEs
+to be evaluated under different physics scenarios (tasks),
+Another major challenge in the
+application of EAs is that they may scale
+poorly with the dimensionality of the
+optimized parameters.
+FEBRUARY 2026 | IEEE COMPUTATIONAL INTELLIGENCE MAGAZINE
+27
+Authorized licensed use limited to: UNIVERSITÄTSBIBLIOTHEK PADERBORN. Downloaded on October 12,2026 at 06:32:43 UTC from IEEE Xplore.  Restrictions apply. 
+
+
+e.g., variations in PDE parameters, and IC/BCs. Moreover,
+for dynamical problems with causality, PINNs can gener-
+ally be formulated to predict sequences of physical states,
+such as at different crack steps in a crack propagation
+study [172] or at different time steps in a time-varying
+dynamical problem [173], [174]. Such PINN models are
+sequentially learned using solutions from previous steps as
+IC/BCs. Relevant task solving experiences (i.e., optimizing
+PINN model parameters) can naturally accumulate over
+time. This allows transfer learning and optimization algo-
+rithms to exploit reusable knowledge from past episodes
+and
+jump-start
+the
+physics-informed
+learning,
+hence
+achieving rapid convergence for new target tasks [175].
+The transfer learning of PINN has also been shown to
+improve solution accuracy on challenging tasks, such as
+high-frequency and multi-scale problems, compared to
+learning the model from scratch [176].
+Transfer learning in the context of PINN commonly
+involves transferring network weights from a similar phys-
+ics scenario that has been previously learned (source task).
+These transferred weights serve as initialization for training
+the target task. Typically, only the last few layers of the
+networks are optimized after the transfer, allowing the
+sharing of previously learned useful features between target
+and source tasks. A singular value decomposition-based
+transfer approach has also been proposed in [177], which
+involves freezing the singular vectors of the dense kernel
+matrix of the hidden layers and only optimizing the singu-
+lar values for the target task. Apart from network weights,
+the study from [178] has shown that transfer learning can
+also facilitate the learning of loss-balancing weights in both
+forward and inverse PINN models.
+Another interesting approach worth exploring is to
+combine physics-informed learning and data-driven learn-
+ing techniques using transfer learning. A multi-ﬁdelity
+transfer learning framework was proposed in [179] to ﬁrst
+train a PINN model to capture important information
+about the governing physics of the problem from the
+approximated (low-ﬁdelity) physics equations. The model
+then undergoes data-driven learning with available high-
+ﬁdelity data, leading to accurate predictions even with lim-
+ited high-ﬁdelity training data. While the study has dem-
+onstrated that transfer learning from physics can beneﬁt a
+data-driven DNN, the reverse pathway deserves further
+investigation.
+There
+is
+potential
+for
+improvements
+to
+PINN optimization by harvesting the experience gained
+from a data-driven DNN model through transfer learning
+and transfer evolutionary optimization.
+2)Adaptive Transfer
+An important question in the transfer of physics-informed
+learning is the identiﬁcation of relevant source task(s). If the
+source task is far from the target task, there could be insufﬁ-
+cient commonalities between these tasks for the transfer to be
+beneﬁcial, and it could even negatively impact the learning
+performance of the target task (negative transfer). For problems
+with causality, a natural choice for source is the networks
+learned on the previous time-step or physical state [173],
+[174]. However, the target function is generally a priori
+unknown in physics-informed learning, hence calculating the
+similarity between target and source tasks based on their out-
+put functions is not feasible. Identifying the most relevant
+source task then becomes a challenge that requires prior
+knowledge of how the system behaves when its geometry,
+PDE, and IC/BC parameters change [180]. This becomes
+even more challenging when dealing with previously solved
+tasks involving multiple parameter changes.
+Adaptive transfer learning can be a particular strategy to
+address the issues without the need for explicit a priori identiﬁ-
+cation of relevant sources. For example, an adaptive transfer
+physics-informed learning framework was proposed in [180]
+to achieve effective transfer, even when there is signiﬁcant var-
+iation in the PDE parameters between the source and target
+tasks. The approach treats the PDE parameters as trainable,
+hence, they can be adaptively updated from the source to tar-
+get parameter values, creating a low-loss path in the parameter
+space to guide the optimization from source to target tasks.
+Throughout this process, the loss is consistently kept at a low
+level (similar to the concept of a minimum energy path con-
+necting two minima [181]), ensuring that the PINN solution
+remains very close to the physical solution and guaranteeing
+the stability of the training process.
+A recent study by Wong et al. [48] on the transfer neu-
+roevolution of PINN demonstrated that accurate solutions
+for new and harder PDEs can be rapidly achieved by opti-
+mizing PINN with EA. A key aspect of this transfer optimi-
+zation approach is its ability to incorporate multiple sources
+of knowledge while optimizing the PINN for the speciﬁc
+target task. This can be achieved through a principled prob-
+ability mixture model-based EA that adaptively assigns
+weights to the different sources based on their observed rel-
+evance to the target task during training, thereby preventing
+detrimental negative transfers. Figure 7 illustrates the accel-
+erated convergence trends achievable through the transfer
+neuroevolution of PINN, with clear optimization advan-
+tages relative to xNES (a state-of-the-art of EA [143]) and
+SGD-based (Adam) training.
+Similar probabilistic formulations are also possible in
+multitask neuroevolution [182], [183], enabling the simul-
+taneous solving of sets of related PDEs in a single algorith-
+mic pass. A multitask approach could prove much faster
+than solving PDEs independently, as useful information is
+shared between tasks without the need to optimize from
+scratch.
+An important question in the transfer of
+physics-informed learning is the
+identiﬁcation of relevant source task(s).
+28
+IEEE COMPUTATIONAL INTELLIGENCE MAGAZINE | FEBRUARY 2026
+Authorized licensed use limited to: UNIVERSITÄTSBIBLIOTHEK PADERBORN. Downloaded on October 12,2026 at 06:32:43 UTC from IEEE Xplore.  Restrictions apply. 
+
+
+D. Evolutionary Meta-Learning for Generalizable PINNs
+1) Meta-Learning in PINNs
+Meta-learning algorithms provide a systematic framework
+for reusing knowledge from a distribution of learning tasks,
+allowing models to quickly adapt to new physics-informed
+learning tasks with minimal training. Crucially, meta-learning
+offers a pathway towards a generalizable PINN over a
+broad class of physics scenarios, including different PDE
+families and geometries, as highlighted in Section III-B.
+For example, the MAML and Reptile algorithms have
+been recently explored in the context of PINN [108],
+[109], [110]. They seek to meta-learn an optimal model
+initialization in the space of network weights from which
+the PINN can rapidly converge to a solution that mini-
+mizes the physics-informed loss of new tasks. This is
+achieved by a task-speciﬁc ﬁne-tuning procedure during
+the meta-learning stage through an inner-outer loop train-
+ing framework. This problem can be mathematically posed
+as a two-stage or bi-level optimization. The network
+weights are trained explicitly (in the outer loop) by opti-
+mizing the model performance over a batch of physics-
+informed learning tasks after one or a few gradient descent
+updates (at the inner loop) from the learned initialization.
+2) Neural Baldwinism
+Recently, a meta-learning PINN framework based on the
+evolutionary principle of Baldwinism—dubbed Baldwinian
+PINN [52]—has been proposed to address the training
+challenges
+faced
+in
+conventional
+gradient-based
+meta-
+learning algorithms such as MAML. The Baldwin effect in
+nature explains the development of phenotypic plasticity
+among a population’s individuals [184], whereby their
+young are “born ready” with strong learning biases to per-
+form a wide range of tasks. In order to pre-wire such
+learning ability into the initial connection strengths of a
+neural network, enabling it to be performant over a distri-
+bution of physics-informed learning tasks, an algorithmic
+realization of neural Baldwinism is examined in the context
+of PINNs. The algorithm tackles the two-stage optimiza-
+tion problem in meta-learning by coupling hidden layer
+evolution, for better generalization across tasks, with life-
+time-learning at the output layer to specialize to particular
+tasks. Task-speciﬁc learning is limited to the output layer
+only [185], [186], allowing the model to solve new linear
+PDE problems with a one-step pseudoinverse operation
+(or a few pseudoinverse steps for nonlinear PDE problems).
+The pseudoinverse operation has a closed form and is
+therefore fast. Unlike gradient-based MAML, the global
+evolutionary
+search
+in
+Baldwinian-PINNs
+is
+better
+equipped to handle the two-stage/bi-level problem formu-
+lation where exact gradients may be difﬁcult to compute.
+Being a gradient-free algorithm, it does not require unroll-
+ing and differentiating through the computation graph,
+making Baldwinian-PINN an efﬁcient method that scales
+FIGURE 7 A PINN simulating projectile motion under gravitational forces on Earth, Mars, or the moon is optimized by transfer natural evolution
+strategies—dubbed tNES. The empirical comparisons of convergence trends between SGD, xNES, and tNES for selected scenarios are provided
+(the bold lines indicate the mean convergence path of multiple independent runs and the shaded areas indicate their 10th-90th
+interpercentile ranges). Individual solutions given by multiple SGD and tNES (transfer from a relevant prior, i.e., source distribution obtained
+by solving a different gravity g or launch angle a0) optimization runs for one particular scenario (g=1.6, a0=45) are plotted and compared
+against the ground truth. Adapted with modiﬁcations from [48]. Original ﬁgure available at [arXiv:2101.01998].
+FEBRUARY 2026 | IEEE COMPUTATIONAL INTELLIGENCE MAGAZINE
+29
+Authorized licensed use limited to: UNIVERSITÄTSBIBLIOTHEK PADERBORN. Downloaded on October 12,2026 at 06:32:43 UTC from IEEE Xplore.  Restrictions apply. 
+
+
+FIGURE 8 Meta-learning PINN with MAML (left) versus Baldwinian evolution (right). In MAML, the initial PINN weights are learned using gradient-
+based method, such that they can be quickly ﬁne-tuned (physics-informed learning) on new tasks. The task-speciﬁc ﬁne-tuning is limited to one or a
+few gradient descents during training, which is usually insufﬁcient for a meta-learned PINN to converge. In Baldwinian evolution, the weight
+distribution in the pre-ﬁnal nonlinear hidden layers ~w and learning hyperparameters  are jointly evolved. The task-speciﬁc ﬁne-tuning is performed
+on the output layer weights w (segregated from ~w) with a 1-step pseudoinverse operation at both training and test time (for linear ODE / PDEs).
+Adapted with modiﬁcations from [52]. Original ﬁgure available at [arXiv:2312.03243].
+FIGURE 9 Schematic to illustrate new tasks arising from family of PDEs problem: S1 change to new PDE (g and d parameters), source term q, and IC
+proﬁle for t 2 ½0; 2 (same time domain as train tasks), and S2 projection to longer time domain t 2 ½0; 4. The solution for new PDE tasks (they are
+visually indistinguishable from the ground truth) can be quickly obtained in the order of milli-seconds by the Baldwinian-PINN [52]. In [52], CMA-ES
+was employed to evolve the Baldwinian-PINN models, demonstrating effective convergence in both physics residuals and MSE (108 training tasks).
+Superior performance is achieved with CMA-ES using initial standard deviations of 5 and 10. The mean MSE across 87 test tasks is below 5e-5.
+Adapted with modiﬁcations from [52]. Original ﬁgure available at [arXiv:2312.03243].
+30
+IEEE COMPUTATIONAL INTELLIGENCE MAGAZINE | FEBRUARY 2026
+Authorized licensed use limited to: UNIVERSITÄTSBIBLIOTHEK PADERBORN. Downloaded on October 12,2026 at 06:32:43 UTC from IEEE Xplore.  Restrictions apply. 
+
+
+well with the number of GPUs available. Figure 8 illus-
+trates the contrast between MAML and Baldwinian evolu-
+tion for PINN.2
+Experiments in [52] clearly illustrate how Baldwinian-
+PINN can consistently solve new physics scenarios within a
+diverse task distribution with orders of magnitude improve-
+ment in speed and accuracy compared to a single PINN
+model. These PDEs include both linear equations such as the
+convection-diffusion, Helmholtz and Poisson equations, and
+non-linear equations such as the Burger’s, Allen-Cahn and dif-
+fusion-reaction equations. Examples of effective generalization
+of a Baldwinian-PINN to an entire PDE family with diverse
+output patterns is demonstrated in Figure 9, on two task sce-
+narios: S1 shows successful learning of solution for unseen set
+of PDEs, including changes to PDE parameters, source term,
+and IC proﬁle; while S2 shows effective extrapolation of solu-
+tion to a longer time domain. Baldwinian-PINNs have clear
+beneﬁts for the continual modeling of dynamical systems
+through their versatility in handling ICs and ability to rapidly
+model and stitch time windows together with minimal error.
+Crucially, Baldwinian evolution does not require explicit
+parameterization, and evolved Baldwinian-PINN can ﬂexibly
+generalize to new ICs, BCs, and PDE source terms, a stark
+contrast to the need for existing parameterized PINNs to have
+pre-deﬁned PDE, BC, or IC parameters. Overall, the out-
+standing results in [52] compared to other meta-learning
+methods (Figure 10) strongly motivate similar approaches in
+the spirit of Baldwinian-PINN.
+3) Meta-Learning Neural Architecture, Loss Function,
+and Optimizer
+Most gradient-based meta-learning PINN approaches pro-
+posed in the literature aim to ﬁnd an optimal initialization of
+the network weights. In the study by [187], a meta-learning
+framework for the PINN loss function that incorporates the
+underlying physics of a parametrized PDE has demonstrated
+signiﬁcant performance improvement for new tasks. In [188],
+the complexity of the PINN optimization problem was pro-
+posed to be tackled by learning a customized optimizer that’s
+itself parameterized by a neural network. Notably, the learning
+of the optimizer was done using a persistent ES algo-
+rithm [189], and showed that meta-learned optimizers could
+substantially improve vanilla PINNs over standard hand-
+crafted optimizers such as Adam.
+There are already a handful of studies that have proposed
+using EAs to ﬁnd performant neural architectures and hyper-
+parameters for a single PINN (ref. to Section IV-B). There is
+huge scope for future research and development into using EAs
+to jointly meta-learn model initialization, neural architecture,
+loss function (hyperparameters), and even the gradient-based
+optimizer to drastically improve convergence on a set of PINN
+tasks. For example, a recent work proposes the use of an EA to
+jointly optimize the neural architecture and network weights
+for a convolutional neural network-type PINN. The meta-
+learned PINN model integrates a physics-informed pseudoin-
+verse computation on the ﬁnal CNN layer to ensure physics
+compliance during prediction of a new scenario. The proposed
+method demonstrated enhanced generalization across diverse
+tasks with varying initial conditions, PDE parameters, and
+geometries, signiﬁcantly outperforming other data-driven
+models like U-Net and Fourier Neural Operator (FNO).
+There is signiﬁcant potential in exploring evolutionary
+computation methods to develop meta-learnable optimizers,
+loss functions, neural architectures, and initializations tailored
+to diverse physics-informed learning tasks, thereby presenting
+opportunities to enhance the generalizability of PINN models.
+Lastly, we would like to make additional remarks on the
+important role of labeled data in meta-learning PINN. In gen-
+eral, the meta-learning incurs a higher upfront training cost to
+achieve good generalization. Some proposed methods such as
+the Baldwinian-PINN cleverly utilize a data-centric meta-
+FIGURE 10 Empirical comparison between results reported in Baldwinian-PINN [52] and recent meta-learning PINN studies. For linear problems,
+the results for NRPINN and Hyper-LR-PINN are extracted from [108] and [110], respectively. For nonlinear problems, the results for other meta-
+learning PINN models / methods (inc. MAML) are extracted from [109]. On nonlinear test tasks, evolved Baldwinian-PINNs achieve up to 10x lower
+relative norm error, with prediction times under 2 seconds—over 100x faster than other meta-learning methods. For instance, in diffusion-reaction
+experiments, Baldwinian-PINN yields 70x better accuracy with 700x less computation time.
+2Python source codes for Baldwinian-PINN are [Online]. Available: https://
+github.com/chiuph/Baldwinian-PINN.
+FEBRUARY 2026 | IEEE COMPUTATIONAL INTELLIGENCE MAGAZINE
+31
+Authorized licensed use limited to: UNIVERSITÄTSBIBLIOTHEK PADERBORN. Downloaded on October 12,2026 at 06:32:43 UTC from IEEE Xplore.  Restrictions apply. 
+
+
+learning objective, i.e., using data MSE rather than purely
+physics-driven loss. Meta-learning PINN algorithms can be
+meaningfully guided by a few tasks with labeled data, easing
+optimization difﬁculties caused by the complex loss landscape
+deﬁned by the physics-informed loss.
+4) Neural Operator Networks
+A notable alternative to learning general PDE solutions is the
+use of neural operator networks in a purely data-driven set-
+ting [190], [191], [192]. By learning mappings between inﬁ-
+nite-dimensional function spaces, neural operators enable
+prediction of solutions in real-time under different PDE source
+terms, ICs or BCs. For instance, consider the 1D Poisson equa-
+tion d2 u
+dx2 ¼ f ðxÞ; a neural operator aims to learn the mapping
+G : f ! u from the source term f ðxÞ to the PDE solution
+uðxÞ. Prominent neural operator architectures encompass the
+Deep Operator Network (DeepONet) [193] and the Fourier
+Neural Operator (FNO) [194]. DeepONet comprises a branch
+network to encode the input function at predetermined sam-
+ple locations, and a trunk network to encode spatial coordi-
+nates at which the output function is evaluated. Conversely,
+FNO employs spectral convolutions to efﬁciently model non-
+local interactions and directly predict the entire ﬁeld solution,
+making it particularly suited for structured-grid data [195].
+Further extensions, such as graph-based neural operators [196],
+transformer operators [197], and geometry-informed opera-
+tors [198], broaden this framework to manage irregular
+domains and bolster computational efﬁciency. Similar to
+other data-driven methods, neural operators are inherently
+data-intensive, typically necessitating large PDE simulation
+datasets to achieve robust generalization.
+The integration of physics-informed losses, such as PDE
+constraints, into neural operators can substantially reduce train-
+ing data requirements by leveraging known physics [199]. This
+approach establishes PINNs and neural operators as comple-
+mentary techniques. Nonetheless, analogous to parameterized
+PINNs, adherence to physical laws during training does not
+necessarily translate to their preservation in out-of-sample pre-
+dictions, thereby presenting common generalization challenges.
+As a result, neural operators often resort to using larger training
+datasets to enhance generalization. Furthermore, unlike param-
+eterization-agnostic Baldwinian-PINNs, they demand explicit
+parameterization of the conditions under which the model is
+intended to generalize. Although this explicit requirement
+diminishes the ﬂexibility of neural operators relative to meta-
+learning strategies, they remain a vital complementary method
+for generalized neural PDE solvers. Currently, the effectiveness
+of EAs for optimizing neural operators remains an open area of
+research. Early work bringing randomization into shallow oper-
+ator networks has appeared in [200], showing their potential to
+outperform standard operator networks in both approximation
+accuracy and computational efﬁciency.
+E. Evolving Interpretable Models Beyond PINNs
+In scientiﬁc machine learning, a key objective of discovering
+new insights from experimental data relies on human-inter-
+pretable models or outputs. While advances have been made
+in explaining the outputs of deep neural networks, these mod-
+els are largely perceived as closed-boxes [201]. The same issue
+naturally afﬂicts PINNs, prompting the brief discussion below
+on the evolution of other model types.
+In contrast to neural networks, the subﬁeld of genetic pro-
+gramming in evolutionary computation has a long history of
+successfully discovering free-form natural laws from data
+through symbolic regression [202], [203]. Recently, these
+algorithms have even been used for solving high-dimensional
+PDEs, with the distinct advantage of offering compact analyti-
+cal expressions approximating complex solutions [204], [205],
+[206]. Balancing compactness and model accuracy is a non-
+trivial task that is well-suited to evolutionary multi-objective
+optimization. In addition to symbolic regression, a highly
+interpretable mathematical description of dynamical systems
+can be obtained by identifying a best-ﬁt linear dynamics model
+(i.e., a linear system of governing ODEs) from data. Although
+ﬁnding such a data-driven model that simultaneously satisﬁes
+physics constraints translates into a highly constrained, nonlin-
+ear and non-convex optimization problem [207], it has been
+shown to be efﬁciently solvable by evolution strategies [208].
+Adaptations of this evolutionary approach to identify nonlinear
+dynamics have also been explored [209], with the ﬁnal predic-
+tion accuracy and training stability of evolution exceeding
+those of models trained by gradient descent.
+V. Conclusion
+As the inﬂuence of deep learning permeates beyond typical
+natural language processing or computer vision tasks, it is clear
+that rationalizable models that adhere to the fundamental laws
+of nature are a need of the hour. Instilling centuries of accu-
+mulated wisdom, in the form of mathematically expressible
+scientiﬁc knowledge, into otherwise naive statistical models is
+crucial. Research efforts in the past few years have demon-
+strated that PINNs are a promising approach to that end.
+However, like any new technique, PINNs inevitably call
+for new technical innovations. Many of the approaches com-
+monly used in training standard data-driven neural networks
+need to be re-evaluated, such as the method of network initiali-
+zation and the choice of activation functions. The use of purely
+gradient-based optimization, which includes the hugely suc-
+cessful family of SGD algorithms, is especially worthy of recon-
+sideration in the light of analyses summarized in this work.
+By learning mappings between inﬁnite-
+dimensional function spaces, neural
+operators enable prediction of
+solutions in real-time under different
+PDE source terms, ICs or BCs.
+32
+IEEE COMPUTATIONAL INTELLIGENCE MAGAZINE | FEBRUARY 2026
+Authorized licensed use limited to: UNIVERSITÄTSBIBLIOTHEK PADERBORN. Downloaded on October 12,2026 at 06:32:43 UTC from IEEE Xplore.  Restrictions apply. 
+
+
+Identiﬁed challenges pertaining to local minima traps, ﬁxed
+point traps, and vanishing gradients of physics-informed learn-
+ing objectives highlight how these can prove deleterious for
+PINNs. These obstacles to conventional gradient-based opti-
+mization serve to outline ways in which gradient-free algo-
+rithms
+of
+computational
+intelligence
+may
+be
+uniquely
+advantageous as substitutes for or in synergy with SGD. Indeed,
+the crafting of synergistic optimization frameworks that meld
+gradient-based and gradient-free optimization unveils novel
+research questions and directions, ﬁrmly positioning scientiﬁc
+machine learning as an emerging area of translational interest
+for the computational intelligence community.
+Acknowledgment
+This work was supported in part by the National Research
+Foundation, Singapore through the AI Singapore Programme,
+under the project “AI-based urban cooling technology devel-
+opment” under Award AISG3-TC-2024-014-SGKR and in
+part by the National Research Foundation, Singapore and
+DSO National Laboratories through AI Singapore Pro-
+gramme—“Design
+Beyond
+What
+You
+Know:
+Material
+Informed Differential Generative AI (MIDGAI) for Light-
+Weight High-Entropy Alloys and Multi-functional Compo-
+sites (Stage 1b)” under Award AISG2-GC-2023-010. The
+work of Abhishek Gupta was supported by the Ramanujan
+Fellowship from the Anusandhan National Research Founda-
+tion, Government of India under Grant RJF/2022/000115.
+References
+[1] G. Carleo et al., “Machine learning and the physical sciences,” Rev. Modern Phys.,
+vol. 91, no. 4, 2019, Art. no. 045002.
+[2] M. Wong, J. Liu, T. Rios, S. Menzel, and Y. S. Ong, “LLM2TEA: Agentic AI
+designer ﬁnds innovative objects with generative evolutionary multitasking,” 2024,
+doi: 10.1109/MCI.2025.3592142.
+[3] A. Ghafarollahi and M. J. Buehler, “Automating alloy design and discovery with
+physics-aware multimodal multiagent AI,” Proc. Nat. Acad. Sci., vol. 122, no. 4,
+2025, Art. no. e2414074122.
+[4] C. Lu, C. Lu, R. T. Lange, J. Foerster, J. Clune, and D. Ha, “The AI scientist:
+Towards fully automated open-ended scientiﬁc discovery,” 2024, arXiv:2408.06292.
+[5] Z. Wei et al., “Evolvable conditional diffusion,” in Proc. 34th Int. Joint Conf. Artif.
+Intell., 2025, pp. 6542–6551.
+[6] Q. Xu, J. Liu, M. Wong, C. Chen, and Y.-S. Ong, “Precise-physics driven text-
+to-3d generation,” 2024, arXiv:2403.12438.
+[7] Q. Wang, L. Song, Z. Guo, J. Li, and Z. Feng, “A novel multi-ﬁdelity surrogate
+for efﬁcient turbine design optimization,” J. Turbomachinery, vol. 146, no. 4, 2024,
+Art. no. 041011.
+[8] J. Zhang, J. Du, M. Zhang, Z. Chen, H. Zhang, and C. Nie, “Aerodynamic per-
+formance improvement of a highly loaded compressor airfoil with coanda jet ﬂap,” J.
+Thermal Sci., vol. 31, pp. 151–162, 2022.
+[9] F. Maze and F. Ahmed, “Diffusion models beat GANs on topology optimiza-
+tion,” in Proc. AAAI Conf. Artif. Intell., 2023, vol. 37, no. 8, pp. 9108–9116.
+[10] H.-M. Huang, E. Raponi, F. Duddeck, S. Menzel, and M. Bujny, “Topology
+optimization of periodic structures for crash and static load cases using the evolution-
+ary level set method,” Optim. Eng., vol. 25, no. 3, pp. 1597–1630, 2024.
+[11] G. Sun, F. Xu, G. Li, and Q. Li, “Crashing analysis and multiobjective optimi-
+zation for thin-walled structures with functionally graded thickness,” Int. J. Impact
+Eng., vol. 64, pp. 62–74, 2014.
+[12] Y. Xiong et al., “Data-driven design space exploration and exploitation for
+design for additive manufacturing,” J. Mech. Des., vol. 141, no. 10, 2019,
+Art. no. 101101.
+[13] J. Doh, N. Raju, N. Raghavan, D. W. Rosen, and S. Kim, “Bayesian inference-
+based decision of fatigue life model for metal additive manufacturing considering
+effects of build orientation and post-processing,” Int. J. Fatigue, vol. 155, 2022,
+Art. no. 106535.
+[14] X. Lai, S. Wang, Z. Guo, C. Zhang, W. Sun, and X. Song, “Designing a shape–
+performance integrated digital twin based on multiple models and dynamic data: A
+boom crane example,” J. Mech. Des., vol. 143, no. 7, 2021, Art. no. 071703.
+[15] X. He et al., “Digital twin-based online structural optimization? Yes, it’s possi-
+ble!,” Thin-Walled Struct., vol. 208, 2024, Art. no. 112796.
+[16] B.-C. Wang, Z.-D. Ji, Y. Wang, H.-X. Li, and Z. Li, “A physics-informed
+composite network for modeling of electrochemical process of large-scale lith-
+ium-ion batteries,” IEEE Trans. Ind. Informat., vol. 21, no. 1, pp. 287–296, Jan.
+2025.
+[17] Y. Zou, Y. Zeng, S. Li, and Q. Zhu, “Machine learning model with physical
+constraints for diffuse optical tomography,” Biomed. Opt. Exp., vol. 12, no. 9,
+pp. 5720–5735, 2021.
+[18] X. Garbet, Y. Idomura, L. Villard, and T. Watanabe, “Gyrokinetic simulations
+of turbulent transport,” Nucl. Fusion, vol. 50, no. 4, 2010, Art. no. 043002.
+[19] X. Garbet et al., “The effect of shaping on trapped electron mode stability: An
+analytical model,” Nucl. Fusion, vol. 64, no. 10, Sep. 2024, Art. no. 106055.
+[20] S. A. Niaki, E. Haghighat, T. Campbell, A. Poursartip, and R. Vaziri, “Physics-
+informed neural network for modelling the thermochemical curing process of com-
+posite-tool systems during manufacture,” Comput. Methods Appl. Mechan. Eng.,
+vol. 384, 2021, Art. no. 113959.
+[21] R. Roscher, B. Bohn, M. F. Duarte, and J. Garcke, “Explainable machine
+learning for scientiﬁc insights and discoveries,” IEEE Access, vol. 8, pp. 42200–
+42216, 2020.
+[22] D. Gunning and D. Aha, “Darpa’s explainable artiﬁcial intelligence (XAI) pro-
+gram,” AI Mag., vol. 40, no. 2, pp. 44–58, 2019.
+[23] Y.-S. Ong and A. Gupta, “AIR 5: Five pillars of artiﬁcial intelligence
+research,” IEEE Trans. Emerg. Topics Comput. Intell., vol. 3, no. 5, pp. 411–
+415, Oct. 2019.
+[24] A. Karpatne et al., “Theory-guided data science: A new paradigm for scientiﬁc
+discovery from data,” IEEE Trans. Knowl. Data Eng., vol. 29, no. 10, pp. 2318–
+2331, Oct. 2017.
+[25] V. Rueden et al., “Informed machine learning–A taxonomy and survey of inte-
+grating prior knowledge into learning systems,” IEEE Trans. Knowl. Data Eng.,
+vol. 35, no. 1, pp. 614–633, Jan. 2023.
+[26] J. Willard, X. Jia, S. Xu, M. Steinbach, and V. Kumar, “Integrating scientiﬁc
+knowledge with machine learning for engineering and environmental systems,”
+ACM Comput. Surv., vol. 55, no. 4, pp. 1–37, 2022.
+[27] G. E. Karniadakis, I. G. Kevrekidis, L. Lu, P. Perdikaris, S. Wang, and L. Yang,
+“Physics-informed machine learning,” Nature Rev. Phys., vol. 3, no. 6, pp. 422–440,
+2021.
+[28] T. Cohen and M. Welling, “Group equivariant convolutional networks,” in
+Proc. Int. Conf. Mach. Learn., 2016, pp. 2990–2999.
+[29] G. Barbastathis, A. Ozcan, and G. Situ, “On the use of deep learning for
+computational imaging,” Optica, vol. 6, no. 8, pp. 921–943, 2019.
+[30] P. W. Battaglia et al., “Relational inductive biases, deep learning, and graph net-
+works,” 2018, arXiv:1806.01261.
+[31] M. Raissi, P. Perdikaris, and G. E. Karniadakis, “Physics-informed neural net-
+works: A deep learning framework for solving forward and inverse problems involv-
+ing nonlinear partial differential equations,” J. Comput. Phys., vol. 378, pp. 686–707,
+2019.
+[32] H. Lee and I. S. Kang, “Neural algorithm for solving differential equations,” J.
+Comput. Phys., vol. 91, no. 1, pp. 110–131, 1990.
+[33] I. E. Lagaris, A. Likas, and D. I. Fotiadis, “Artiﬁcial neural networks for solving
+ordinary and partial differential equations,” IEEE Trans. Neural Netw., vol. 9, no. 5,
+pp. 987–1000, Sep. 1998.
+[34] J. Bradbury et al., “JAX: Composable transformations of Python NumPy pro-
+grams,” 2018. [Online]. Available: http://github.com/jax-ml/jax
+[35] “Nvidia physicsnemo: An open-source framework for physics-based deep learn-
+ing in science and engineering,” 2023. [Online]. Available: https://github.com/
+NVIDIA/physicsnemo
+[36] E. Haghighat and R. Juanes, “SciANN: A keras/tensorﬂow wrapper for
+scientiﬁc computations and physics-informed deep learning using artiﬁcial neu-
+ral
+networks,”
+Comput.
+Methods
+Appl.
+Mechan.
+Eng.,
+vol.
+373,
+2021,
+Art. no. 113552.
+[37] L. Lu, X. Meng, Z. Mao, and G. E. Karniadakis, “DeepXDE: A deep learning
+library for solving differential equations,” SIAM Rev., vol. 63, no. 1, pp. 208–228,
+2021.
+[38] A. Krishnapriyan, A. Gholami, S. Zhe, R. Kirby, and M. W. Mahoney, “Char-
+acterizing possible failure modes in physics-informed neural networks,” in Proc. Adv.
+Neural Inf. Process. Syst., 2021, vol. 34, pp. 26548–26560.
+[39] O. Fuks and H. A. Tchelepi, “Limitations of physics informed machine learning
+for nonlinear two-phase transport in porous media,” J. Mach. Learn. Model. Comput.,
+vol. 1, no. 1, 2020.
+[40] W. Ji, W. Qiu, Z. Shi, S. Pan, and S. Deng, “STIFF-PINN: Physics-informed
+neural network for stiff chemical kinetics,” J. Phys. Chem. A, vol. 125, no. 36,
+pp. 8098–8106, 2021.
+[41] S. Cuomo, V. S. Di Cola, F. Giampaolo, G. Rozza, M. Raissi, and F. Piccialli,
+“Scientiﬁc machine learning through physics–informed neural networks: Where we
+are and what’s next,” J. Sci. Comput., vol. 92, no. 3, 2022, Art. no. 88.
+[42] S. Cai, Z. Mao, Z. Wang, M. Yin, and G. E. Karniadakis, “Physics-informed
+neural networks (PINNs) for ﬂuid mechanics: A review,” Acta Mechanica Sinica,
+vol. 37, no. 12, pp. 1727–1738, 2021.
+[43] C. Banerjee, K. Nguyen, C. Fookes, and K. George, “Physics-informed com-
+puter vision: A review and perspectives,” ACM Comput. Surv., vol. 57, no. 1, pp. 1–
+38, 2024.
+FEBRUARY 2026 | IEEE COMPUTATIONAL INTELLIGENCE MAGAZINE
+33
+Authorized licensed use limited to: UNIVERSITÄTSBIBLIOTHEK PADERBORN. Downloaded on October 12,2026 at 06:32:43 UTC from IEEE Xplore.  Restrictions apply. 
+
+
+[44] Z. Hao et al., “Pinnacle: A comprehensive benchmark of physics-informed
+neural networks for solving PDES,” in Proc. Adv. Neural Inform. Process. Syst., 2024,
+vol. 37, pp. 76721–76774.
+[45] J. D. Toscano et al., “From PINNs to PIKANs: Recent advances in physics-
+informed machine learning,” Mach. Learn. Comput. Sci. Eng., vol. 1, no. 1, pp. 1–43,
+2025.
+[46] R. Bischof and M. Kraus, “Multi-objective loss balancing for physics-informed
+deep learning,” Comput. Methods Appl. Mech. Eng., vol. 439, 2025, Art. no. 117914.
+[47] S. Wang, Y. Teng, and P. Perdikaris, “Understanding and mitigating gradient
+ﬂow pathologies in physics-informed neural networks,” SIAM J. Sci. Comput.,
+vol. 43, no. 5, pp. A3055–A3081, 2021.
+[48] J. C. Wong, A. Gupta, and Y.-S. Ong, “Can transfer neuroevolution tractably
+solve your differential equations?,” IEEE Comput. Intell. Mag., vol. 16, no. 2, pp. 14–
+30, May 2021.
+[49] A. Gupta and B. Mishra, “Neuroevolving monotonic pinns for particle break-
+age analysis,” in Proc. 2024 IEEE Conf. Artif. Intell., 2024, pp. 993–996.
+[50] A. Kaplarevic-Malisic et al., “Identifying optimal architectures of physics-
+informed neural networks by evolutionary strategy,” Appl. Soft Comput., vol. 146,
+2023, Art. no. 110646.
+[51] A. Daw, J. Bu, S. Wang, P. Perdikaris, and A. Karpatne, “Mitigating propaga-
+tion failures in physics-informed neural networks using retain-resample-release (R3)
+sampling,” in Proc. 40th Int. Conf. Mach. Learn., 2023, pp. 7264–7302.
+[52] J. C. Wong et al., “Evolutionary optimization of physics-informed neural
+networks:
+Advancing
+generalizability
+by
+the
+Baldwin
+effect,”
+2025,
+arXiv:2501.06572.
+[53] P.-H. Chiu, J. C. Wong, C. Ooi, M. H. Dao, and Y.-S. Ong, “Can-PINN: A
+fast physics-informed neural network based on coupled-automatic–numerical differ-
+entiation method,” Comput. Methods Appl. Mechan. Eng., vol. 395, 2022,
+Art. no. 114909.
+[54] J. C. Wong, P.-H. Chiu, C. Ooi, M. H. Dao, and Y.-S. Ong, “LSA-PINN:
+Linear boundary connectivity loss for solving PDEs on complex geometry,” in Proc.
+2023 Int. Joint Conf. Neural Netw., 2023, pp. 1–10.
+[55] M. Stynes, “Steady-state convection-diffusion problems,” Acta Numerica,
+vol. 14, pp. 445–508, 2005.
+[56] R. Temam, Navier–Stokes Equations: Theory and Numerical Analysis, vol. 343.
+Providence, RI, USA: Amer. Math. Soc., 2024.
+[57] J. Peiro and S. Sherwin, “Finite difference, ﬁnite element and ﬁnite volume
+methods for partial differential equations,” in Handbook of Materials Modeling: Methods.
+Berlin, Germany: Springer, 2005, pp. 2415–2446.
+[58] N. Wandel, M. Weinmann, and R. Klein, “Learning incompressible ﬂuid
+dynamics from scratch–towards fast, differentiable ﬂuid models that generalize,” in
+Proc. 9th Int. Conf. Learn. Representations, 2021.
+[59] R. Zhang, Y. Liu, and H. Sun, “Physics-informed multi-LSTM networks for
+metamodeling of nonlinear structures,” Comput. Methods Appl. Mechan. Eng.,
+vol. 369, 2020, Art. no. 113226.
+[60] M. Mahmoudabadbozchelou and S. Jamali, “Rheology-informed neural net-
+works (RHINNs) for forward and inverse metamodelling of complex ﬂuids,” Sci.
+Rep., vol. 11, no. 1, pp. 1–13, 2021.
+[61] L. Yang, X. Meng, and G. E. Karniadakis, “B-PINNs: Bayesian physics-
+informed neural networks for forward and inverse PDE problems with noisy data,”
+J. Comput. Phys., vol. 425, 2021, Art. no. 109913.
+[62] F. A. Viana and A. K. Subramaniyan, “A survey of Bayesian calibration and
+physics-informed neural networks in scientiﬁc modeling,” Arch. Comput. Methods
+Eng., vol. 28, pp. 3801–3830, 2021.
+[63] A. M. Tartakovsky, C. O. Marrero, P. Perdikaris, G. D. Tartakovsky, and
+D. Barajas-Solano, “Physics-informed deep neural networks for learning parameters
+and constitutive relationships in subsurface ﬂow problems,” Water Resour. Res.,
+vol. 56, no. 5, 2020, Art. no. e2019WR026731.
+[64] Z. Chen, Y. Liu, and H. Sun, “Physics-informed learning of governing
+equations
+from
+scarce
+data,”
+Nature
+Commun.,
+vol.
+12,
+no.
+1,
+2021,
+Art. no. 6136.
+[65] E. Kharazmi, M. Cai, X. Zheng, Z. Zhang, G. Lin, and G. E. Karniadakis,
+“Identiﬁability and predictability of integer-and fractional-order epidemiological
+models using physics-informed neural networks,” Nature Comput. Sci., vol. 1, no. 11,
+pp. 744–753, 2021.
+[66] R. Shi, Z. Mo, and X. Di, “Physics-informed deep learning for trafﬁc state esti-
+mation: A hybrid paradigm informed by second-order trafﬁc models,” in Proc. AAAI
+Conf. Artif. Intell., vol. 35, no. 1, 2021, pp. 540–547.
+[67] C. Oszkinat, S. E. Luczak, and I. Rosen, “Uncertainty quantiﬁcation in estimat-
+ing blood alcohol concentration from transdermal alcohol level with physics-
+informed neural networks,” IEEE Trans. Neural Netw. Learn. Syst., vol. 34, no. 10,
+pp. 8094–8101, Oct. 2023.
+[68] M. Raissi, A. Yazdani, and G. E. Karniadakis, “Hidden ﬂuid mechanics: Learn-
+ing velocity and pressure ﬁelds from ﬂow visualizations,” Science, vol. 367, no. 6481,
+pp. 1026–1030, 2020.
+[69] Q. Zhu, Z. Liu, and J. Yan, “Machine learning for metal additive
+manufacturing: Predicting temperature and melt pool ﬂuid dynamics using
+physics-informed neural networks,” Comput. Mechan., vol. 67, pp. 619–635,
+2021.
+[70] X. Liu, W. Peng, Z. Gong, W. Zhou, and W. Yao, “Temperature ﬁeld inver-
+sion of heat-source systems via physics-informed neural networks,” Eng. Appl. Artif.
+Intell., vol. 113, 2022, Art. no. 104902.
+[71] S. Cai et al., “Artiﬁcial intelligence velocimetry and microaneurysm-on-a-chip
+for three-dimensional analysis of blood ﬂow in physiology and disease,” Proc. Nat.
+Acad. Sci., vol. 118, no. 13, 2021, Art. no. e2100697118.
+[72] C. R. Herrera, T. Grandits, G. Plank, P. Perdikaris, F. S. Costabal, and S. Pez-
+zuto, “Physics-informed neural networks to learn cardiac ﬁber orientation from mul-
+tiple electroanatomical maps,” Eng. with Comput., vol. 38, no. 5, pp. 3957–3973,
+2022.
+[73] L. Lu, R. Pestourie, W. Yao, Z. Wang, F. Verdugo, and S. G. Johnson, “Phys-
+ics-informed neural networks with hard constraints for inverse design,” SIAM J. Sci.
+Comput., vol. 43, no. 6, pp. B1105–B1132, 2021.
+[74] Z. Fang and J. Zhan, “Deep physical informed neural networks for metamaterial
+design,” IEEE Access, vol. 8, pp. 24506–24513, 2020.
+[75] S. Wang, H. Wang, and P. Perdikaris, “On the eigenvector bias of Fourier
+feature networks: From regression to solving multi-scale PDEs with physics-
+informed neural networks,” Comput. Methods Appl. Mechan. Eng., vol. 384,
+2021, Art. no. 113938.
+[76] S. Wang, X. Yu, and P. Perdikaris, “When and why PINNs fail to train:
+A neural tangent kernel perspective,” J. Comput. Phys., vol. 449, 2022,
+Art. no. 110768.
+[77] M. Elhamod et al., “Cophy-PGNN: Learning physics-guided neural networks
+with competing loss functions for solving eigenvalue problems,” ACM Trans. Intell.
+Syst. Technol., vol. 13, pp. 1–23, 2020.
+[78] Z. Xiang, W. Peng, X. Liu, and W. Yao, “Self-adaptive loss balanced physics-
+informed neural networks,” Neurocomputing, vol. 496, pp. 11–34, 2022.
+[79] C. Wang, S. Li, D. He, and L. Wang, “Is L2 physics-informed loss always suit-
+able for training physics-informed neural network?,” in Proc. Adv. Neural Inform. Pro-
+cess. Syst., 2022, vol. 35, pp. 8278–8290.
+[80] S. Wang, S. Sankaran, and P. Perdikaris, “Respecting causality for training phys-
+ics-informed neural networks,” Comput. Methods Appl. Mechan. Eng., vol. 421, 2024,
+Art. no. 116813.
+[81] J. C. Wong, C. C. Ooi, A. Gupta, and Y.-S. Ong, “Learning in sinusoidal
+spaces with physics-informed neural networks,” IEEE Trans. Artif. Intell., vol. 5,
+no. 3, pp. 985–1000, Mar. 2024.
+[82] A. Gupta and B. K. Mishra, “Multi-head neural networks for simulating particle
+breakage
+dynamics,”
+Theor.
+Appl.
+Mechan.
+Lett.,
+vol.
+14,
+no.
+2,
+2024,
+Art. no. 100515.
+[83] G. Jin, J. C. Wong, A. Gupta, S. Li, and Y.-S. Ong, “Fourier warm start for
+physics-informed neural networks,” Eng. Appl. Artif. Intell., vol. 132, 2024,
+Art. no. 107887.
+[84] N. Rahaman et al., “On the spectral bias of neural networks,” in Proc. Int.
+Conf. Mach. Learn., 2019, pp. 5301–5310.
+[85] Z.-Q. J. Xu, Y. Zhang, and Y. Xiao, “Training behavior of deep neural net-
+work in frequency domain,” in Proc. 26th Int. Conf. Neural Inf. Process., Sydney,
+NSW, Australia, Springer, 2019, pp. 264–274.
+[86] A. Bonfanti, G. Bruno, and C. Cipriani, “The challenges of the nonlinear
+regime for physics-informed neural networks,” in Proc. Adv. Neural Inform. Pro-
+cess. Syst., 2024, vol. 37, pp. 41852–41881.
+[87] A. Daw, J. Bu, S. Wang, P. Perdikaris, and A. Karpatne, “Rethinking the
+importance
+of
+sampling
+in
+physics-informed
+neural
+networks,”
+2022,
+arXiv:2207.02338.
+[88] S. Wang and P. Perdikaris, “Long-time integration of parametric evolution
+equations with physics-informed deeponets,” J. Comput. Phys., vol. 475, 2023,
+Art. no. 111855.
+[89] F. M. Rohrhofer, S. Posch, C. G€oßnitzer, and B. Geiger, “On the role of ﬁxed
+points of dynamical systems in training physics-informed neural networks,” Trans.
+Mach. Learn. Res., vol. 2023, no. 1, 2023, Art. no. 490.
+[90] G. K. R. Lau, A. Hemachandra, S.-K. Ng, and B. K. H. Low, “Pinnacle: PINN
+adaptive collocation and experimental points selection,” in Proc. Int. Conf. Mach.
+Learn. AI Sci. Workshop, 2024.
+[91] C. C. Ooi et al., “Importance of Nyquist-Shannon sampling in training of phys-
+ics-informed neural networks,” in Proc. 2024 Int. Joint Conf. Neural Netw., 2024,
+pp. 1–8.
+[92] H. Wu, H. Luo, Y. Ma, J. Wang, and M. Long, “ROPINN: Region optimized
+physics-informed neural networks,” in Proc. Adv. Neural Inform. Process. Syst., 2024,
+vol. 37, pp. 110494–110532.
+[93] S. Wang, S. Sankaran, H. Wang, and P. Perdikaris, “An Expert’s guide to train-
+ing physics-informed neural networks,” 2023, arXiv:2308.08468.
+[94] S. Wang, B. Li, Y. Chen, and P. Perdikaris, “Piratenets: Physics-informed deep
+learning with residual adaptive networks,” J. Mach. Learn. Res., vol. 25, no. 402,
+pp. 1–51, 2024.
+[95] S. Wang, A. K. Bhartari, B. Li, and P. Perdikaris, “Gradient alignment in phys-
+ics-informed neural networks: A second-order optimization perspective,” 2025,
+arXiv:2502.00604.
+[96] V. Sitzmann, J. Martel, A. Bergman, D. Lindell, and G. Wetzstein, “Implicit
+neural representations with periodic activation functions,” in Proc. Adv. Neural Inf.
+Process. Syst., 2020, vol. 33, pp. 7462–7473.
+[97] A. D. Jagtap, K. Kawaguchi, and G. E. Karniadakis, “Adaptive activation func-
+tions accelerate convergence in deep and physics-informed neural networks,” J.
+Comput. Phys., vol. 404, 2020, Art. no. 109136.
+[98] S. Zeng, Z. Zhang, and Q. Zou, “Adaptive deep neural networks methods for
+high-dimensional partial differential equations,” J. Comput. Phys., vol. 463, 2022,
+Art. no. 111232.
+34
+IEEE COMPUTATIONAL INTELLIGENCE MAGAZINE | FEBRUARY 2026
+Authorized licensed use limited to: UNIVERSITÄTSBIBLIOTHEK PADERBORN. Downloaded on October 12,2026 at 06:32:43 UTC from IEEE Xplore.  Restrictions apply. 
+
+
+[99] N. Kang, B. Lee, Y. Hong, S.-B. Yun, and E. Park, “Pixel: Physics-informed
+cell representations for fast and accurate PDE solvers,” in Proc. AAAI Conf. Artif.
+Intell., vol. 37, no. 7, 2023, pp. 8186–8194.
+[100] F. Arnold and R. King, “State–space modeling for control based on physics-
+informed neural networks,” Eng. Appl. Artif. Intell., vol. 101, 2021, Art. no. 104195.
+[101] G. Gokhale, B. Claessens, and C. Develder, “Physics informed neural net-
+works for control oriented thermal modeling of buildings,” Appl. Energy, vol. 314,
+2022, Art. no. 118852.
+[102] U. G€ung€ord€u and J. Kestner, “Robust quantum gates using smooth
+pulses and physics-informed neural networks,” Phys. Rev. Res., vol. 4, no. 2,
+2022, Art. no. 023155.
+[103] S. Mowlavi and S. Nabi, “Optimal control of PDEs using physics-informed
+neural networks,” J. Comput. Phys., vol. 473, 2023, Art. no. 111731.
+[104] T. Iwata, Y. Tanaka, and N. Ueda, “Meta-learning of physics-informed neural
+networks for efﬁciently solving newly given PDES,” 2023, arXiv:2310.13270.
+[105] F. de Avila Belbute-Peres, Y.-f. Chen, and F. Sha, “HyperPINN: Learning
+parameterized differential equations with physics-informed hypernetworks,” in The
+Symbiosis Deep Learn. Differ. Equ., 2021.
+[106] X. Huang et al., “Meta-auto-decoder for solving parametric partial differential
+equations,” in Proc. Adv. Neural Inf. Process. Syst., 2022, vol. 35, pp. 23426–23438.
+[107] M. Toloubidokhti et al., “Dats: Difﬁculty-aware task sampler for meta-learn-
+ing physics-informed neural networks,” in Proc. 12th Int. Conf. Learn. Representations,
+2023.
+[108] X. Liu, X. Zhang, W. Peng, W. Zhou, and W. Yao, “A novel meta-learning
+initialization method for physics-informed neural networks,” Neural Comput. Appl.,
+vol. 34, no. 17, pp. 14511–14534, 2022.
+[109] M. Penwarden, S. Zhe, A. Narayan, and R. M. Kirby, “A metalearning
+approach for physics-informed neural networks (PINNs): Application to parameter-
+ized PDEs,” J. Comput. Phys., vol. 477, 2023, Art. no. 111912.
+[110] W. Cho, K. Lee, D. Rim, and N. Park, “Hypernetwork-based meta-learning
+for low-rank physics-informed neural networks,” in Proc. 37th Int. Conf. Neural Inf.
+Process. Syst., 2024, pp. 11219-11231.
+[111] Y. Chen and S. Koohy, “GPT-PINN: Generative pre-trained physics-
+informed neural networks toward non-intrusive meta-learning of parametric PDEs,”
+Finite Elements Anal. Des., vol. 228, 2024, Art. no. 104047.
+[112] W. Cho et al., “Parameterized physics-informed neural networks for parame-
+terized PDES,” in Proc. 41st Int. Conf. Mach. Learn., 2024, pp. 8510–8533.
+[113] C. Finn, P. Abbeel, and S. Levine, “Model-agnostic meta-learning for fast
+adaptation of deep networks,” in Proc. Int. Conf. Mach. Learn., 2017, pp. 1126–1135.
+[114] A. Nichol and J. Schulman, “Reptile: A scalable metalearning algorithm,”
+2018, arXiv:1803.02999.
+[115] N. McGreivy and A. Hakim, “Weak baselines and reporting biases lead to
+overoptimism in machine learning for ﬂuid-related partial differential equations,”
+Nature Mach. Intell., vol. 6, no. 10, pp. 1256–1269, 2024.
+[116] T. G. Grossmann, U. J. Komorowska, J. Latz, and C.-B. Sch€onlieb, “Can
+physics-informed neural networks beat the ﬁnite element method?,” IMA J. Appl.
+Math., vol. 89, no. 1, pp. 143–174, 2024.
+[117] R. Miikkulainen and S. Forrest, “A biological perspective on evolutionary
+computation,” Nature Mach. Intell., vol. 3, no. 1, pp. 9–15, 2021.
+[118] T. Back, Evolutionary Algorithms in Theory and Practice: Evolution Strategies,
+Evolutionary Programming, Genetic Algorithms. London, U.K.: Oxford Univ. Press,
+1996.
+[119] Y. Ollivier, L. Arnold, A. Auger, and N. Hansen, “Information-geometric
+optimization algorithms: A unifying picture via invariance principles,” J. Mach. Learn.
+Res., vol. 18, no. 18, pp. 1–65, 2017.
+[120] C. Davi and U. Braga-Neto, “PSO-PINN: Physics-informed neural networks
+trained with particle swarm optimization,” 2022, arXiv:2202.01943.
+[121] C. Davi and U. Braga-Neto, “Multi-objective PSO-PINN,” in Proc. 1st Work-
+shop Synergy Sci. Mach. Learn. Model., 2023.
+[122] U. Fasel, J. N. Kutz, B. W. Brunton, and S. L. Brunton, “Ensemble-sindy:
+Robust sparse model discovery in the low-data, high-noise limit, with active learning
+and control,” Proc. Roy. Soc. A, vol. 478, no. 2260, 2022, Art. no. 20210904.
+[123] H. X. Choong, Y.-S. Ong, A. Gupta, C. Chen, and R. Lim, “Jack
+and masters of all trades: One-pass learning sets of model sets from large pre-
+trained models,” IEEE Comput. Intell. Mag., vol. 18, no. 3, pp. 29–40, Aug.
+2023.
+[124] Z. Wei et al., “How to select physics-informed neural networks in the absence
+of ground truth: A pareto front-based strategy,” in Proc. 1st Workshop Synergy Sci.
+Mach. Learn. Model., 2023.
+[125] F. M. Rohrhofer, S. Posch, C. G€oßnitzer, and B. C. Geiger, “Data vs. physics:
+The apparent pareto front of physics-informed neural networks,” IEEE Access,
+vol. 11, pp. 86252–86261, 2023.
+[126] F. Heldmann, S. Berkhahn, M. Ehrhardt, and K. Klamroth, “PINN training
+using biobjective optimization: The trade-off between data loss and residual loss,” J.
+Comput. Phys., vol. 488, 2023, Art. no. 112211.
+[127] C. A. C. Coello, Evolutionary Algorithms for Solving Multi-Objective Problems.
+Berlin, Germany: Springer, 2007.
+[128] K. Deb and M. Ehrgott, “On generalized dominance structures for multi-
+objective optimization,” Math. Comput. Appl., vol. 28, no. 5, 2023, Art. no. 100.
+[129] B. Lu, C. Moya, and G. Lin, “NSGA-PINN: A multi-objective optimization
+method for physics-informed neural network training,” Algorithms, vol. 16, no. 4,
+2023, Art. no. 194.
+[130] K. Deb, A. Pratap, S. Agarwal, and T. Meyarivan, “A fast and elitist multiob-
+jective genetic algorithm: NSGA-II,” IEEE Trans. Evol. Comput., vol. 6, no. 2,
+pp. 182–197, Apr. 2002.
+[131] D. P. Kingma, “Adam: A method for stochastic optimization,” 2014,
+arXiv:1412.6980.
+[132] T. de Wolff, H. C. Lincopi, L. Martı, and N. Sanchez-Pi, “MOPINNs:
+An evolutionary multi-objective approach to physics-informed neural net-
+works,” in Proc. Genet. Evol. Computation Conf. Companion, 2022, pp. 228–231.
+[133] G. Yu, L. Ma, Y. Jin, W. Du, Q. Liu, and H. Zhang, “A survey on knee-ori-
+ented multiobjective evolutionary optimization,” IEEE Trans. Evol. Comput.,
+vol. 26, no. 6, pp. 1452–1472, Dec. 2022.
+[134] Y.-S. Ong, M.-H. Lim, N. Zhu, and K.-W. Wong, “Classiﬁcation of adaptive
+memetic algorithms: A comparative study,” IEEE Trans. Syst., Man, Cybern., Part B,
+vol. 36, no. 1, pp. 141–152, Feb. 2006.
+[135] S. Yang, Y. Tian, C. He, X. Zhang, K. C. Tan, and Y. Jin, “A gradient-guided
+evolutionary approach to training deep neural networks,” IEEE Trans. Neural Netw.
+Learn. Syst., vol. 33, no. 9, pp. 4861–4875, Sep. 2022.
+[136] Y. Xue, Y. Tong, and F. Neri, “An ensemble of differential evolution and
+adam for training feed-forward neural networks,” Inf. Sci., vol. 608, pp. 453–471,
+2022.
+[137] X. Cui, W. Zhang, Z. T€uske, and M. Picheny, “Evolutionary stochastic gradi-
+ent descent for optimization of deep neural networks,” in Proc. 32nd Int. Conf. Neural
+Inf. Process. Syst., 2018, pp. 6051–6061.
+[138] X. Chen, Y.-S. Ong, M.-H. Lim, and K. C. Tan, “A multi-facet survey on
+memetic computation,” IEEE Trans. Evol. Comput., vol. 15, no. 5, pp. 591–607,
+Oct. 2011.
+[139] A. Gupta and Y.-S. Ong, Memetic Computation: The Mainspring of Knowl-
+edge Transfer in a Data-Driven Optimization Era, vol. 21. Berlin, Germany:
+Springer, 2018.
+[140] K. M. Malan and M. A. Mu~noz, “Why we should be benchmarking evolu-
+tionary algorithms on neural network training tasks,” in Proc. Genet. Evol. Computa-
+tion Conf., 2025, pp. 30–38.
+[141] N. Sung, J. C. Wong, C. C. Ooi, A. Gupta, P.-H. Chiu, and Y.-S. Ong,
+“Neuroevolution of physics-informed neural nets: Benchmark problems and
+comparative results,” in Proc. Companion Conf. Genet. Evol. Computation, 2023,
+pp. 2144–2151.
+[142] N. Hansen and A. Ostermeier, “Completely derandomized self-adaptation
+in evolution strategies,” Evol. Computation, vol. 9, no. 2, pp. 159–195,
+2001.
+[143] D. Wierstra, T. Schaul, T. Glasmachers, Y. Sun, J. Peters, and J. Schmidhuber,
+“Natural evolution strategies,” J. Mach. Learn. Res., vol. 15, no. 1, pp. 949–980, 2014.
+[144] S. Hochreiter and J. Schmidhuber, “Flat minima,” Neural Computation, vol. 9,
+no. 1, pp. 1–42, 1997.
+[145] Y. Tang, Y. Tian, and D. Ha, “Evojax: Hardware-accelerated neuroevo-
+lution,” in Proc. Genet. Evol. Computation Conf. Companion, 2022, pp. 308–311.
+[146] T. Salimans, J. Ho, X. Chen, S. Sidor, and I. Sutskever, “Evolution strategies as
+a scalable alternative to reinforcement learning,” 2017, arXiv:1703.03864.
+[147] B. Hartl, Y. Zhang, H. Hazan, and M. Levin, “Heuristically adaptive diffusion-
+model evolutionary strategy,” 2024, arXiv:2411.13420.
+[148] D. Choi, C. J. Shallue, Z. Nado, J. Lee, C. J. Maddison, and G. E. Dahl, “On
+empirical comparisons of optimizers for deep learning,” 2019, arXiv:1910.05446.
+[149] M. Tessari and G. Iacca, “Reinforcement learning based adaptive metaheuris-
+tics,” in Proc. Genet. Evol. Computation Conf. Companion, 2022, pp. 1854–1861.
+[150] K. Nishida and Y. Akimoto, “PSA-CMA-ES: CMA-ES with population size
+adaptation,” in Proc. Genet. Evol. Computation Conf., 2018, pp. 865–872.
+[151] M. Nomura, Y. Akimoto, and I. Ono, “CMA-ES with learning rate adapta-
+tion,” ACM Trans. Evol. Learn., vol. 5, no. 1, pp. 1–28, 2025.
+[152] Y. Nesterov and V. Spokoiny, “Random gradient-free minimization of
+convex functions,” Found. Comput. Math., vol. 17, no. 2, pp. 527–566,
+2017.
+[153] M. N. Omidvar, X. Li, and X. Yao, “A review of population-based metaheur-
+istics for large-scale black-box global optimization—Part I,” IEEE Trans. Evol. Com-
+put., vol. 26, no. 5, pp. 802–822, Oct. 2022.
+[154] Y. Wang and L. Zhong, “NAS-PINN: Neural architecture search-guided
+physics-informed neural network for solving PDES,” J. Comput. Phys., vol. 496,
+2024, Art. no. 112603.
+[155] T. Zhang, R. Yan, S. Zhang, D. Yang, and A. Chen, “Application of Fourier
+feature physics-information neural network in model of pipeline conveying ﬂuid,”
+Thin-Walled Struct., vol. 198, 2024, Art. no. 111693.
+[156] O. Sallam and M. F€urth, “On the use of Fourier features-physics informed
+neural networks (FF-PINN) for forward and inverse ﬂuid mechanics problems,”
+Proc. Inst. Mech. Engineers, Part M: J. Eng. Maritime Environ., vol. 237, no. 4, pp. 846–
+866, 2023.
+[157] Q. A. Huhn, M. E. Tano, and J. C. Ragusa, “Physics-informed neural net-
+work with fourier features for radiation transport in heterogeneous media,” Nucl.
+Sci. Eng., vol. 197, no. 9, pp. 2484–2497, 2023.
+[158] K. O. Stanley, J. Clune, J. Lehman, and R. Miikkulainen, “Designing neural
+networks through neuroevolution,” Nature Mach. Intell., vol. 1, no. 1, pp. 24–35,
+2019.
+[159] Y. Liu, Y. Sun, B. Xue, M. Zhang, G. G. Yen, and K. C. Tan, “A survey on
+evolutionary neural architecture search,” IEEE Trans. Neural Netw. Learn. Syst.,
+vol. 34, no. 2, pp. 550–570, Feb. 2023.
+FEBRUARY 2026 | IEEE COMPUTATIONAL INTELLIGENCE MAGAZINE
+35
+Authorized licensed use limited to: UNIVERSITÄTSBIBLIOTHEK PADERBORN. Downloaded on October 12,2026 at 06:32:43 UTC from IEEE Xplore.  Restrictions apply. 
+
+
+[160] E. Skomski, J. Drgona, and A. Tuor, “Automating discovery of physics-
+informed neural state space models via learning and evolution,” in Proc. Conf. Learn.
+Dyn. Control, 2021, pp. 980–991.
+[161] B. Zhang and C. Yang, “Discovering physics-informed neural networks model
+for solving partial differential equations through evolutionary computation,” Swarm
+Evol. Computation, vol. 88, 2024, Art. no. 101589.
+[162] S. Dong and Z. Li, “Local extreme learning machines and domain decomposi-
+tion for solving linear and nonlinear partial differential equations,” Comput. Methods
+Appl. Mechan. Eng., vol. 387, 2021, Art. no. 114129.
+[163] S. Dong and J. Yang, “On computing the hyperparameter of extreme learning
+machines: Algorithm and application to computational PDEs, and comparison with
+classical and high-order ﬁnite elements,” J. Comput. Phys., vol. 463, 2022,
+Art. no. 111290.
+[164] R. Storn and K. Price, “Differential evolution–A simple and efﬁcient heuristic
+for global optimization over continuous spaces,” J. Glob. Optim., vol. 11, pp. 341–
+359, 1997.
+[165] Y. Jin, H. Wang, T. Chugh, D. Guo, and K. Miettinen, “Data-driven evolu-
+tionary optimization: An overview and case studies,” IEEE Trans. Evol. Comput.,
+vol. 23, no. 3, pp. 442–458, Jun. 2019.
+[166] H. Wang, Y. Jin, and J. Doherty, “Committee-based active learning for surro-
+gate-assisted particle swarm optimization of expensive problems,” IEEE Trans.
+Cybern., vol. 47, no. 9, pp. 2664–2677, Sep. 2017.
+[167] Z. Wang, Q. Zhang, Y.-S. Ong, S. Yao, H. Liu, and J. Luo, “Choose appro-
+priate subproblems for collaborative modeling in expensive multiobjective optimiza-
+tion,” IEEE Trans. Cybern., vol. 53, no. 1, pp. 483–496, Jan. 2023.
+[168] C. Sun, Y. Jin, R. Cheng, J. Ding, and J. Zeng, “Surrogate-assisted coopera-
+tive swarm optimization of high-dimensional expensive problems,” IEEE Trans.
+Evol. Comput., vol. 21, no. 4, pp. 644–660, Aug. 2017.
+[169] Y. Wang, D.-Q. Yin, S. Yang, and G. Sun, “Global and local surrogate-
+assisted differential evolution for expensive constrained optimization problems with
+inequality constraints,” IEEE Trans. Cybern., vol. 49, no. 5, pp. 1642–1656, May
+2019.
+[170] H. Wang and Y. Jin, “A random forest-assisted evolutionary algorithm for
+data-driven constrained multiobjective combinatorial optimization of trauma sys-
+tems,” IEEE Trans. Cybern., vol. 50, no. 2, pp. 536–549, Feb. 2020.
+[171] J. Liu, Y. Wang, G. Sun, and T. Pang, “Multisurrogate-assisted ant col-
+ony optimization for expensive optimization problems with continuous and
+categorical variables,” IEEE Trans. Cybern., vol. 52, no. 11, pp. 11348–11361,
+Nov. 2022.
+[172] S. Goswami, C. Anitescu, S. Chakraborty, and T. Rabczuk, “Transfer learning
+enhanced physics informed neural network for phase-ﬁeld modeling of fracture,”
+Theor. Appl. Fracture Mechan., vol. 106, 2020, Art. no. 102447.
+[173] R. Mattey and S. Ghosh, “A novel sequential method to train physics
+informed neural networks for Allen Cahn and Cahn Hilliard equations,” Comput.
+Methods Appl. Mechan. Eng., vol. 390, 2022, Art. no. 114474.
+[174] H. Tang, Y. Liao, H. Yang, and L. Xie, “A transfer learning-physics informed
+neural network (TL-PINN) for vortex-induced vibration,” Ocean Eng., vol. 266,
+2022, Art. no. 113101.
+[175] K. Prantikos, S. Chatzidakis, L. H. Tsoukalas, and A. Heifetz, “Physics-
+informed neural network with transfer learning (TL-PINN) based on domain simi-
+larity measure for prediction of nuclear reactor transients,” Sci. Rep., vol. 13, no. 1,
+2023, Art. no. 16840.
+[176] A. H. Mustajab, H. Lyu, Z. Rizvi, and F. Wuttke, “Physics-informed neural
+networks for high-frequency and multi-scale problems using transfer learning,”
+Appl. Sci., vol. 14, no. 8, 2024, Art. no. 3204.
+[177] Y. Gao, K. C. Cheung, and M. K. Ng, “SVD-PINNs: Transfer learning of
+physics-informed neural networks via singular value decomposition,” in Proc. 2022
+IEEE Symp. Ser. Comput. Intell., 2022, pp. 1443–1450.
+[178] C. Xu, B. T. Cao, Y. Yuan, and G. Meschke, “Transfer learning based phys-
+ics-informed neural networks for solving inverse problems in engineering structures
+under different loading scenarios,” Comput. Methods Appl. Mechan. Eng., vol. 405,
+2023, Art. no. 115852.
+[179] S. Chakraborty, “Transfer learning based multi-ﬁdelity physics informed deep
+neural network,” J. Comput. Phys., vol. 426, 2021, Art. no. 109942.
+[180] Y. Liu, W. Liu, X. Yan, S. Guo, and C.-a. Zhang, “Adaptive transfer learning
+for PINN,” J. Comput. Phys., vol. 490, 2023, Art. no. 112291.
+[181] T. Garipov, P. Izmailov, D. Podoprikhin, D. P. Vetrov, and A. G. Wilson,
+“Loss surfaces, mode connectivity, and fast ensembling of DNNs,” in Proc. 32nd Int.
+Conf. Neural Inf. Process. Syst., 2018, pp. 8803–8812.
+[182] A. Gupta, L. Zhou, Y.-S. Ong, Z. Chen, and Y. Hou, “Half a dozen real-
+world applications of evolutionary multitasking, and more,” IEEE Comput. Intell.
+Mag., vol. 17, no. 2, pp. 49–66, May 2022.
+[183] N. Zhang, A. Gupta, Z. Chen, and Y.-S. Ong, “Multitask neuroevolution for
+reinforcement learning with long and short episodes,” IEEE Trans. Cogn. Devel.
+Syst., vol. 15, no. 3, pp. 1474–1486, Sep. 2023.
+[184] K. L. Downing, “Heterochronous neural baldwinism,” in Proc. Artif. Life Conf.
+Proc., 2012, pp. 37–44.
+[185] Z. Zou and G. E. Karniadakis, “L-hydra: Multi-head physics-informed neural
+networks,” 2023, arXiv:2301.02152.
+[186] S. Desai, M. Mattheakis, H. Joy, P. Protopapas, and S. Roberts, “One-shot
+transfer learning of physics-informed neural networks,” 2021, arXiv:2110.11286.
+[187] A. F. Psaros, K. Kawaguchi, and G. E. Karniadakis, “Meta-learning PINN loss
+functions,” J. Comput. Phys., vol. 458, 2022, Art. no. 111121.
+[188] A. Bihlo, “Improving physics-informed neural networks with meta-learned
+optimization,” J. Mach. Learn. Res., vol. 25, no. 14, pp. 1–26, 2024.
+[189] P. Vicol, L. Metz, and J. Sohl-Dickstein, “Unbiased gradient estimation in
+unrolled computation graphs with persistent evolution strategies,” in Proc. Int. Conf.
+Mach. Learn., 2021, pp. 10553–10563.
+[190] S. Goswami, A. Bora, Y. Yu, and G. E. Karniadakis, “Physics-informed deep
+neural operator networks,” in Machine Learning in Modeling and Simulation: Methods
+and Applications. Berlin, Germany: Springer, 2023, pp. 219–254.
+[191] K. Azizzadenesheli, N. Kovachki, Z. Li, M. Liu-Schiafﬁni, J. Kossaiﬁ, and
+A. Anandkumar, “Neural operators for accelerating scientiﬁc simulations and
+design,” Nature Rev. Phys., vol. 6, no. 5, pp. 320–328, 2024.
+[192] L. Cao, H. Hong, and M. Jiang, “Fast solving partial differential equations via
+imitative Fourier neural operator,” in Proc. 2024 Int. Joint Conf. Neural Netw., 2024,
+pp. 1–8.
+[193] L. Lu, P. Jin, G. Pang, Z. Zhang, and G. E. Karniadakis, “Learning nonlinear
+operators via deeponet based on the universal approximation theorem of operators,”
+Nature Mach. Intell., vol. 3, no. 3, pp. 218–229, 2021.
+[194] Z. Li et al., “Physics-informed neural operator for learning partial differential
+equations,” ACM/JMS J. Data Sci., vol. 1, no. 3, pp. 1–27, 2024.
+[195] Z. Li, D. Z. Huang, B. Liu, and A. Anandkumar, “Fourier neural operator
+with learned deformations for PDEs on general geometries,” J. Mach. Learn. Res.,
+vol. 24, no. 388, pp. 1–26, 2023.
+[196] N. Kovachki et al., “Neural operator: Learning maps between function
+spaces with applications to PDEs,” J. Mach. Learn. Res., vol. 24, no. 89, pp. 1–97,
+2023.
+[197] Z. Hao et al., “GNOT: A general neural operator transformer for operator
+learning,” in Proc. Int. Conf. Mach. Learn., 2023, pp. 12556–12569.
+[198] Z. Li et al., “Geometry-informed neural operator for large-scale 3D PDEs,” in
+Proc. Adv. Neural Inf. Process. Syst., 2023, vol. 36, pp. 35836–35854.
+[199] S. Wang, H. Wang, and P. Perdikaris, “Learning the solution operator of
+parametric partial differential equations with physics-informed deeponets,” Sci. Adv.,
+vol. 7, no. 40, 2021, Art. no. eabi8605.
+[200] G. Fabiani, I. G. Kevrekidis, C. Siettos, and A. N. Yannacopoulos, “Rando-
+nets: Shallow networks with random projections for learning linear and nonlinear
+operators,” J. Comput. Phys., vol. 520, 2025, Art. no. 113433.
+[201] S. Ali et al., “Explainable artiﬁcial intelligence (XAI): What we know and
+what is left to attain trustworthy artiﬁcial intelligence,” Inf. Fusion, vol. 99, 2023,
+Art. no. 101805.
+[202] M. Schmidt and H. Lipson, “Distilling free-form natural laws from experimen-
+tal data,” Science, vol. 324, no. 5923, pp. 81–85, 2009.
+[203] J. Dong and J. Zhong, “Recent advances in symbolic regression,” ACM Com-
+put. Surv., vol. 57, no. 11, pp. 1–37, 2025.
+[204] L. Cao et al., “An interpretable approach to the solutions of high-dimensional
+partial differential equations,” in Proc. AAAI Conf. Artif. Intell., vol. 38, no. 18, 2024,
+pp. 20640–20648.
+[205] L. Cao, Z. Zheng, C. Ding, J. Cai, and M. Jiang, “Genetic programming sym-
+bolic regression with simpliﬁcation-pruning operator for solving differential equa-
+tions,” in Proc. Int. Conf. Neural Inf. Process., 2023, pp. 287–298.
+[206] L. Cao, Z. Lin, K. C. Tan, and M. Jiang, “Interpretable solutions for multi-
+physics PDEs using T-NNGP,” in Proc. AAAI Conf. Artif. Intell., vol. 39, no. 13,
+2025, pp. 14212–14220.
+[207] T. Askham and J. N. Kutz, “Variable projection methods for an optimized
+dynamic mode decomposition,” SIAM J. Appl. Dynamical Syst., vol. 17, no. 1,
+pp. 380–416, 2018.
+[208] A. Gupta and B. K. Mishra, “Globally optimized dynamic mode decomposi-
+tion: A ﬁrst study in particulate systems modelling,” Theor. Appl. Mechan. Lett.,
+vol. 15, 2024, Art. no. 100563.
+[209] J. Hazelden, Y. H. Liu, E. Shlizerman, and E. Shea-Brown, “Evolutionary
+algorithms as an alternative to backpropagation for supervised training of biophysical
+neural networks and neural ODEs,” 2023, arXiv:2311.10869.
+36
+IEEE COMPUTATIONAL INTELLIGENCE MAGAZINE | FEBRUARY 2026
+Authorized licensed use limited to: UNIVERSITÄTSBIBLIOTHEK PADERBORN. Downloaded on October 12,2026 at 06:32:43 UTC from IEEE Xplore.  Restrictions apply. 
