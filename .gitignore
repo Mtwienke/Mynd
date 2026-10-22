@@ -1,0 +1,5 @@
+vault
+vault/*
+*__pycache__*
+Vault_Obsidian
+*cache*
