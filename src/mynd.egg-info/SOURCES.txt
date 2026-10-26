@@ -5,6 +5,7 @@ src/ai/base.py
 src/ai/hosted.py
 src/ai/local.py
 src/ai/models.py
+src/ai/runtime.py
 src/ai/summarize.py
 src/ingestion/extract_metadata.py
 src/ingestion/extract_references.py

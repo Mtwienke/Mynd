@@ -41,6 +41,7 @@ class SummaryWriter:
         context = self._metadata_context(metadata or {})
         chunks = self._chunks(source)
         if len(chunks) == 1:
+            report("Summarizing text part 1/1")
             material = chunks[0]
         else:
             notes = []
@@ -69,9 +70,15 @@ Paper metadata:
 Source material:
 {material}
 """
-        return self.generator.generate(prompt).strip()
+        result = self.generator.generate(prompt).strip()
+        return result
 
-    def annotate_references(self, text: str, references: list[dict], metadata: dict | None = None) -> list[dict]:
+    def annotate_references(
+        self,
+        text: str,
+        references: list[dict],
+        metadata: dict | None = None,
+    ) -> list[dict]:
         """Add tentative reading cues to extracted references, grounded in the paper text."""
         if not references:
             return references

@@ -42,6 +42,25 @@ mynd review-queue
 
 Open the configured vault in Obsidian. Notes are written under `10 Papers/`.
 
+## Inference modes and thermal response
+
+Choose a reduced-resource profile when starting ingestion:
+
+```bash
+mynd ingest --mode silent
+```
+
+While ingestion is running, change its mode from another terminal:
+
+```bash
+mynd mode silent
+mynd mode normal
+```
+
+Mode changes take effect on the next model request. Resource profiles and thermal control are active only in `silent` mode. On macOS, Mynd pauses model generation at `serious` or `critical` and resumes when the state drops below `serious`. When [`macmon`](https://github.com/vladkens/macmon) is installed, any fan RPM above 0 selects the extra-low profile for the next silent-mode request. Install macmon with `brew install macmon`; use `--verbose` to see CPU/GPU temperatures and fan RPM after model requests and PDFs. On other operating systems, manual modes work but automatic thermal response is not implemented.
+
+Use `mynd ingest --verbose` in either mode to see Ollama request options, generation timing/token statistics, and model allocation changes reported by Ollama. Verbose diagnostics report runtime information without enabling the silent profile.
+
 ## Optional bibliography extraction with GROBID
 
 GROBID is not bundled with this project. If Docker is installed, start a local instance:

@@ -17,6 +17,7 @@ import pymupdf
 # Import model management
 from ai.models import get_model_manager
 from ai.summarize import SummaryWriter
+from ai.runtime import MacThermalMonitor, RuntimeControl
 
 DOI_RE = re.compile(r"\b10\.\d{4,9}/[-._;()/:A-Z0-9]+\b", re.IGNORECASE)
 
@@ -707,7 +708,12 @@ def _reference_error_detail(exc: Exception) -> str:
     return f"GROBID reference extraction failed: {exc}"
 
 
-def process_inbox(settings: Settings, crossref: CrossrefClient | None = None) -> list[dict[str, Any]]:
+def process_inbox(
+    settings: Settings,
+    crossref: CrossrefClient | None = None,
+    *,
+    verbose: bool = False,
+) -> list[dict[str, Any]]:
     def report(message: str) -> None:
         print(f"[ingest] {message}", file=sys.stderr, flush=True)
 
@@ -721,7 +727,19 @@ def process_inbox(settings: Settings, crossref: CrossrefClient | None = None) ->
         return []
 
     # Ensure the LLM is ready for future summarization.
-    manager = get_model_manager(use_local=settings.use_local_llm)
+    runtime_control = RuntimeControl(settings.data_path / ".mynd-mode")
+    report(f"Inference mode: {runtime_control.mode()}")
+    if settings.use_local_llm and not MacThermalMonitor.supported():
+        report(f"Automatic thermal response is not implemented for {sys.platform}; mode limits still work")
+    if settings.use_local_llm and verbose:
+        runtime_control.report_thermal_state("ingestion start", report)
+
+    manager = get_model_manager(
+        use_local=settings.use_local_llm,
+        runtime_control=runtime_control,
+        progress=report,
+        verbose=verbose,
+    )
     report(f"Checking summarization model availability ({manager.model})")
     if not manager.ensure_model():
         report(f"Model {manager.model} is unavailable; continuing ingestion without summarization")
@@ -737,6 +755,8 @@ def process_inbox(settings: Settings, crossref: CrossrefClient | None = None) ->
             result = ingest_pdf(pdf, settings, crossref, progress=report, summarizer=summarizer)
             results.append(result)
             report(f"Finished PDF {index}/{len(pdfs)}: {pdf.name} ({result['status']})")
+            if settings.use_local_llm and verbose:
+                runtime_control.report_thermal_state(f"PDF {index}/{len(pdfs)}", report)
         except Exception as exc:
             with sqlite3.connect(settings.database_path) as db:
                 db.execute(
@@ -745,6 +765,8 @@ def process_inbox(settings: Settings, crossref: CrossrefClient | None = None) ->
                 )
             results.append({"status": "failed", "filename": pdf.name, "error": str(exc)})
             report(f"Failed PDF {index}/{len(pdfs)}: {pdf.name}: {exc}")
+            if settings.use_local_llm and verbose:
+                runtime_control.report_thermal_state(f"PDF {index}/{len(pdfs)} failure", report)
     return results
 
 
