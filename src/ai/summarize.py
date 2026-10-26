@@ -59,7 +59,8 @@ using these exact headings in this exact order: `## Overview`,
 `## Main contributions`, `## Approach`, `## Findings`, and
 `## Limitations and open questions`. Do not rename or omit these headings.
 If a heading has little evidence, say so briefly under it. Summarize the paper's
-own claims and findings, not its bibliography or what cited papers claim.
+own claims and findings. Do not add citation callouts, bibliography entries, or
+claims about cited works.
 Keep the whole summary concise.
 
 Paper metadata:

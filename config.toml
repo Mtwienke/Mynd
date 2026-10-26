@@ -1,5 +1,5 @@
 # Replace vault_path with the absolute path to your Obsidian vault.
-vault_path = "./Vault_Obsidian/MyndVault"
+vault_path = "./Obsidian/MyndVault"
 data_path = "./vault"
 inbox_path = "./vault/00 Inbox"
 pdf_store_path = "./vault/10 Papers"

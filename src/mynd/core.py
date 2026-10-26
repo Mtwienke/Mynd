@@ -217,6 +217,88 @@ def _paper_id(doi: str | None, digest: str) -> str:
     return "paper-" + digest[:16]
 
 
+def _ensure_reference_stub(vault: Path, citation: dict[str, Any]) -> Path:
+    """Create a stable, clearly marked note so unresolved citations are linkable."""
+    doi = normalize_doi(citation.get("doi"))
+    raw = citation.get("raw_reference", "")
+    title = citation.get("title") or raw or "Unknown reference"
+    identity = doi.lower() if doi else title.casefold()
+    paper_id = _paper_id(doi, hashlib.sha1(identity.encode("utf-8")).hexdigest())
+    metadata = {"title": title, "doi": doi, "authors": [], "year": None,
+                "venue": None, "abstract": None, "url": f"https://doi.org/{doi}" if doi else None}
+    placeholders_dir = vault / "11 Citation Placeholders"
+    placeholders_dir.mkdir(parents=True, exist_ok=True)
+    expected = placeholders_dir / f"{_slug(title)} ({paper_id[-12:]}).md"
+    if expected.exists():
+        return expected
+    raw = citation.get("raw_reference", "")
+    content = f'''---
+type: paper-placeholder
+work_id: {_yaml_quote(paper_id)}
+doi: {_yaml_quote(doi or "")}
+year: null
+status: reference-placeholder
+---
+
+# {title}
+
+This placeholder was created from a citation. Ingest the paper to replace it with a full paper note.
+
+- **DOI:** {f'[doi:{doi}](https://doi.org/{doi})' if doi else 'Not identified'}
+- **Citation as extracted:** {raw}
+'''
+    expected.write_text(content, encoding="utf-8")
+    return expected
+
+
+def _obsidian_link(vault: Path, target: str | Path) -> str:
+    """Build a vault-relative Obsidian link to an existing note path."""
+    path = _migrate_bracketed_note_path(Path(target))
+    try:
+        link_path = path.resolve().relative_to(vault.resolve()).with_suffix("")
+    except ValueError:
+        link_path = Path(path.stem)
+    return f"[[{link_path.as_posix()}]]"
+
+
+def _migrate_bracketed_note_path(path: Path) -> Path:
+    """Rename legacy `Title [id].md` notes to parser-safe `Title (id).md` names."""
+    match = re.match(r"^(.*) \[([0-9a-fA-F]{12,16})\](\.md)$", path.name)
+    if not match or not path.exists():
+        return path
+    replacement = path.with_name(f"{match.group(1)} ({match.group(2)}){match.group(3)}")
+    if replacement.exists():
+        return replacement
+    path.rename(replacement)
+    return replacement
+
+
+def _link_summary_citations(summary: str | None, citations: list[dict[str, Any]], vault: Path) -> str | None:
+    """Replace numeric bibliography callouts with links in bibliography order."""
+    if not summary:
+        return summary
+
+    def replace_group(match: re.Match[str]) -> str:
+        group = match.group(1)
+
+        def replace_number(number_match: re.Match[str]) -> str:
+            index = int(number_match.group(0)) - 1
+            if index < 0 or index >= len(citations):
+                return number_match.group(0)
+            citation = citations[index]
+            note = citation.get("target_note") or citation.get("placeholder_note")
+            if not note:
+                return number_match.group(0)
+            return _obsidian_link(vault, note)
+
+        converted = re.sub(r"\d+", replace_number, group)
+        return f"({converted})"
+
+    citation_group = r"(\d+(?:\s*[,;–-]\s*\d+)*)"
+    summary = re.sub(r"(?<!\[)\[\[" + citation_group + r"\]\](?!\])", replace_group, summary)
+    return re.sub(r"(?<!\[)\[" + citation_group + r"\](?!\])", replace_group, summary)
+
+
 def _slug(text: str) -> str:
     text = re.sub(r"[\\/:*?\"<>|#^\[\]]", "", text)
     text = re.sub(r"\s+", " ", text).strip(" .")
@@ -233,7 +315,10 @@ def write_note(vault: Path, paper_id: str, metadata: dict[str, Any], source_pdf:
     papers_dir = vault / "10 Papers"
     papers_dir.mkdir(parents=True, exist_ok=True)
     title = metadata.get("title") or source_pdf.stem
-    path = papers_dir / f"{_slug(title)} [{paper_id[-12:]}].md"
+    path = papers_dir / f"{_slug(title)} ({paper_id[-12:]}).md"
+    legacy_path = papers_dir / f"{_slug(title)} [{paper_id[-12:]}].md"
+    if legacy_path.exists() and not path.exists():
+        legacy_path.rename(path)
     authors = metadata.get("authors") or []
     doi = metadata.get("doi") or ""
     year = metadata.get("year") or ""
@@ -254,8 +339,9 @@ def write_note(vault: Path, paper_id: str, metadata: dict[str, Any], source_pdf:
             labels.append(f"Similarity: {similarity}")
         annotation = " · ".join(labels)
         if target_path:
-            relative = Path(target_path).stem
-            citation_lines.append(f"- [[{relative}]]" + (f" — {annotation}" if annotation else ""))
+            citation_lines.append(f"- {_obsidian_link(vault, target_path)}" + (f" — {annotation}" if annotation else ""))
+        elif citation.get("placeholder_note"):
+            citation_lines.append(f"- {_obsidian_link(vault, citation['placeholder_note'])}" + (f" — {annotation}" if annotation else ""))
         else:
             status = citation.get("status", "unresolved")
             citation_lines.append(f"- **{status.title()} reference:** {raw}" + (f" — {annotation}" if annotation else ""))
@@ -307,7 +393,7 @@ status: inbox
 
 ## References
 
-Importance describes the paper's role in this work (foundational, closely related, or supporting); direction tags indicate what it contributes (method, benchmark, topic, or context). Treat these as tentative reading aids, not citation counts.
+Reference labels are tentative reading aids inferred from this paper's text.
 
 {cites}
 
@@ -450,6 +536,7 @@ def ingest_pdf(
                 except (httpx.HTTPError, ET.ParseError, OSError) as exc:
                     extraction_error = _reference_error_detail(exc)
             summary = None
+            citations = _citation_records(settings, paper_id)
             if summarizer and extracted_text:
                 summary_text = _text_without_references(extracted_text)
                 report(
@@ -457,11 +544,15 @@ def ingest_pdf(
                     f"{len(extracted_text):,} characters; terminal references excluded)"
                 )
                 summary = summarizer.summarize(summary_text, metadata, progress=report)
-                citations = summarizer.annotate_references(summary_text, _citation_records(settings, paper_id), metadata)
+                citations = summarizer.annotate_references(summary_text, citations, metadata)
                 report("Summary generated")
+            for citation in citations:
+                if not citation.get("target_note"):
+                    citation["placeholder_note"] = str(_ensure_reference_stub(settings.vault_path, citation))
+            summary = _link_summary_citations(summary, citations, settings.vault_path)
             report("Writing Obsidian note")
             note = write_note(settings.vault_path, paper_id, metadata, existing_pdf_path,
-                              citations if summarizer and extracted_text else _citation_records(settings, paper_id), summary)
+                              citations, summary)
             db.execute("UPDATE papers SET note_path=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
                        (str(note), paper_id))
             db.commit()
@@ -580,6 +671,11 @@ def ingest_pdf(
         summary = summarizer.summarize(summary_text, metadata, progress=report)
         citations = summarizer.annotate_references(summary_text, citations, metadata)
         report("Summary generated")
+
+    for citation in citations:
+        if not citation.get("target_note"):
+            citation["placeholder_note"] = str(_ensure_reference_stub(settings.vault_path, citation))
+    summary = _link_summary_citations(summary, citations, settings.vault_path)
 
     report("Writing Obsidian note")
     note = write_note(settings.vault_path, paper_id, metadata, stored_pdf, citations, summary)
