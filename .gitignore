@@ -1,5 +1,5 @@
-vault
-vault/*
-*__pycache__*
-Obsidian
-*cache*
+/vault/
+/Obsidian/
+__pycache__/
+*.py[cod]
+.DS_Store
