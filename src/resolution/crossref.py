@@ -6,13 +6,15 @@ import httpx
 from resolution.doi import normalize_doi
 from resolution.metadata import PaperMetadata
 
+CROSSREF_API_URL = "https://api.crossref.org"
+
 
 class CrossrefClient:
     """Shared Crossref REST client for ingestion and CLI workflows."""
 
     def __init__(self, email: str = "you@example.com", timeout: float = 15.0):
         self.client = httpx.Client(
-            base_url="https://api.crossref.org",
+            base_url=CROSSREF_API_URL,
             params={"mailto": email},
             timeout=timeout,
             headers={"User-Agent": "Mynd/0.1 (personal research library)"},

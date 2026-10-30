@@ -4,6 +4,8 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
+DEFAULT_GROBID_URL = "http://localhost:8070"
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -14,7 +16,7 @@ class Settings:
     inbox_path: Path
     pdf_store_path: Path
     database_path: Path
-    grobid_url: str = "http://localhost:8070"
+    grobid_url: str = DEFAULT_GROBID_URL
     use_grobid: bool = True
     crossref_email: str = "you@example.com"
     use_local_llm: bool = True
@@ -35,7 +37,7 @@ def load_settings(path: Path) -> Settings:
         inbox_path=resolve(raw["inbox_path"]),
         pdf_store_path=resolve(raw["pdf_store_path"]),
         database_path=resolve(raw["database_path"]),
-        grobid_url=raw.get("grobid_url", "http://localhost:8070").rstrip("/"),
+        grobid_url=raw.get("grobid_url", DEFAULT_GROBID_URL).rstrip("/"),
         use_grobid=bool(raw.get("use_grobid", True)),
         crossref_email=raw.get("crossref_email", "you@example.com"),
         use_local_llm=raw.get("use_local_llm", True),

@@ -6,10 +6,12 @@ from defusedxml import ElementTree as ET
 from resolution.doi import normalize_doi
 from resolution.metadata import ReferenceRecord
 
+TEI_NAMESPACE = "http://www.tei-c.org/ns/1.0"
+
 
 def extract_grobid_references(
     pdf_path: Path,
-    base_url: str = "http://localhost:8070",
+    base_url: str,
     timeout: float = 90.0,
 ) -> list[ReferenceRecord]:
     """Extract bibliography records from a PDF using a running GROBID service."""
@@ -22,7 +24,7 @@ def extract_grobid_references(
         )
     response.raise_for_status()
     root = ET.fromstring(response.text)
-    namespace = {"tei": "http://www.tei-c.org/ns/1.0"}
+    namespace = {"tei": TEI_NAMESPACE}
     references: list[ReferenceRecord] = []
     for node in root.findall(".//tei:biblStruct", namespace):
         raw = " ".join(" ".join(node.itertext()).split())

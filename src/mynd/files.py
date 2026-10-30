@@ -8,13 +8,14 @@ from pathlib import Path
 _REFERENCES_HEADING = re.compile(
     r"(?im)^[ \t]*(?:REFERENCES(?:[ \t]+AND[ \t]+NOTES)?|BIBLIOGRAPHY)[ \t]*$"
 )
+_HASH_CHUNK_SIZE = 1 << 20
 
 
 def sha256_file(path: Path) -> str:
     """Return the SHA-256 digest of a file, read in bounded chunks."""
     digest = hashlib.sha256()
     with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+        for chunk in iter(lambda: handle.read(_HASH_CHUNK_SIZE), b""):
             digest.update(chunk)
     return digest.hexdigest()
 

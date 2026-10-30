@@ -84,4 +84,4 @@ def test_extract_grobid_references_empty_bibliography(tmp_path):
     response.raise_for_status.return_value = None
 
     with patch("ingestion.extract_references.httpx.post", return_value=response):
-        assert extract_grobid_references(pdf) == []
+        assert extract_grobid_references(pdf, base_url="http://localhost:8070") == []

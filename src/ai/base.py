@@ -1,6 +1,7 @@
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 
+@runtime_checkable
 class TextGenerator(Protocol):
     """A model backend that turns a prompt into a text completion."""
 

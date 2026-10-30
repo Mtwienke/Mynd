@@ -9,6 +9,42 @@ if TYPE_CHECKING:
     from resolution.citations import CitationRecord
     from resolution.metadata import PaperMetadata
 
+_INSERT_CITATION_SQL = """\
+INSERT OR IGNORE INTO citations
+(source_paper_id, target_paper_id, raw_reference, cited_doi, status, confidence, evidence)
+VALUES(?,?,?,?,?,?,?)"""
+
+_CITATIONS_FOR_PAPER_SQL = """\
+SELECT c.raw_reference, c.cited_doi AS doi, c.status, target.note_path AS target_note
+FROM citations c LEFT JOIN papers target ON target.id=c.target_paper_id
+WHERE c.source_paper_id=? ORDER BY c.id"""
+
+_PAPER_METADATA_SQL = """\
+SELECT doi, title, year, authors_json, venue, url, abstract, metadata_json
+FROM papers WHERE id=?"""
+
+_SAVE_PAPER_SQL = """\
+INSERT INTO papers(id, doi, title, year, authors_json, venue, url, abstract, metadata_json)
+VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(id) DO UPDATE SET
+doi=COALESCE(excluded.doi, papers.doi),
+title=CASE WHEN papers.title IS NULL OR papers.title='' THEN excluded.title ELSE papers.title END,
+updated_at=CURRENT_TIMESTAMP"""
+
+_INSERT_DOCUMENT_SQL = """\
+INSERT OR IGNORE INTO documents
+(id, paper_id, sha256, original_name, stored_path, extracted_text)
+VALUES(?,?,?,?,?,?)"""
+
+_UNRESOLVED_CITATIONS_SQL = """\
+SELECT p.title, c.raw_reference, c.cited_doi, c.status
+FROM citations c JOIN papers p ON p.id=c.source_paper_id
+WHERE c.status IN ('unresolved', 'ambiguous', 'external')
+ORDER BY p.title"""
+
+_METADATA_FIELDS = {"doi", "title", "year", "authors", "venue", "url", "abstract"}
+EXTRACTION_EVIDENCE = "GROBID bibliography extraction"
+
 
 class StoredDocument(NamedTuple):
     """Row identifying an already-ingested PDF."""
@@ -34,45 +70,38 @@ class PendingCitation(NamedTuple):
     status: str
 
 
-def insert_extracted_citations(
+def _citation_row(paper_id: str, citation: CitationRecord) -> tuple:
+    """Project one citation record onto the persisted citation columns."""
+    return (
+        paper_id,
+        citation.get("target_id"),
+        citation["raw_reference"],
+        citation.get("doi"),
+        citation.get("status", "unresolved"),
+        citation.get("confidence", 0.0),
+        EXTRACTION_EVIDENCE,
+    )
+
+
+def insert_resolved_citations(
     database_path: Path, paper_id: str, citations: list[CitationRecord]
 ) -> None:
-    """Persist GROBID references without replacing annotations already in SQLite."""
+    """Persist resolved citations, keeping any annotations already present."""
+    rows = [_citation_row(paper_id, citation) for citation in citations]
     with sqlite3.connect(database_path) as db:
-        db.executemany(
-            """INSERT OR IGNORE INTO citations
-            (source_paper_id, target_paper_id, raw_reference, cited_doi, status, confidence, evidence)
-            VALUES(?,?,?,?,?,?,?)""",
-            [
-                (
-                    paper_id,
-                    None,
-                    citation["raw_reference"],
-                    citation.get("doi"),
-                    citation.get("status", "unresolved"),
-                    citation.get("confidence", 0.0),
-                    "GROBID bibliography extraction",
-                )
-                for citation in citations
-            ],
-        )
+        db.executemany(_INSERT_CITATION_SQL, rows)
 
 
 def citations_for_paper(database_path: Path, paper_id: str) -> list[CitationRecord]:
     """Return citation records joined with resolved paper note paths."""
     with sqlite3.connect(database_path) as db:
         db.row_factory = sqlite3.Row
-        rows = db.execute(
-            """SELECT c.raw_reference, c.cited_doi AS doi, c.status,
-                      target.note_path AS target_note
-               FROM citations c LEFT JOIN papers target ON target.id=c.target_paper_id
-               WHERE c.source_paper_id=? ORDER BY c.id""",
-            (paper_id,),
-        ).fetchall()
+        rows = db.execute(_CITATIONS_FOR_PAPER_SQL, (paper_id,)).fetchall()
     return [dict(row) for row in rows]
 
 
 def document_for_digest(database_path: Path, digest: str) -> StoredDocument | None:
+    """Return the stored document matching a PDF digest, if any."""
     with sqlite3.connect(database_path) as db:
         row = db.execute(
             "SELECT id, paper_id, stored_path FROM documents WHERE sha256=?", (digest,)
@@ -81,11 +110,15 @@ def document_for_digest(database_path: Path, digest: str) -> StoredDocument | No
 
 
 def update_document_path(database_path: Path, document_id: str, path: Path) -> None:
+    """Record the new location of a document whose stored copy moved."""
     with sqlite3.connect(database_path) as db:
-        db.execute("UPDATE documents SET stored_path=? WHERE id=?", (str(path), document_id))
+        db.execute(
+            "UPDATE documents SET stored_path=? WHERE id=?", (str(path), document_id)
+        )
 
 
 def extracted_text_for_document(database_path: Path, document_id: str) -> str:
+    """Return the extracted text saved with a document, or an empty string."""
     with sqlite3.connect(database_path) as db:
         row = db.execute(
             "SELECT extracted_text FROM documents WHERE id=?", (document_id,)
@@ -94,12 +127,9 @@ def extracted_text_for_document(database_path: Path, document_id: str) -> str:
 
 
 def metadata_for_paper(database_path: Path, paper_id: str) -> PaperMetadata | None:
+    """Return persisted bibliographic metadata for a paper."""
     with sqlite3.connect(database_path) as db:
-        row = db.execute(
-            """SELECT doi, title, year, authors_json, venue, url, abstract, metadata_json
-               FROM papers WHERE id=?""",
-            (paper_id,),
-        ).fetchone()
+        row = db.execute(_PAPER_METADATA_SQL, (paper_id,)).fetchone()
     if row is None:
         return None
     return {
@@ -115,12 +145,16 @@ def metadata_for_paper(database_path: Path, paper_id: str) -> PaperMetadata | No
 
 
 def paper_id_for_doi(database_path: Path, doi: str) -> str | None:
+    """Return the paper id already stored for a DOI."""
     with sqlite3.connect(database_path) as db:
-        row = db.execute("SELECT id FROM papers WHERE lower(doi)=lower(?)", (doi,)).fetchone()
+        row = db.execute(
+            "SELECT id FROM papers WHERE lower(doi)=lower(?)", (doi,)
+        ).fetchone()
     return row[0] if row else None
 
 
 def paper_for_doi(database_path: Path, doi: str) -> PaperLocation | None:
+    """Return the paper id and note path stored for a DOI."""
     with sqlite3.connect(database_path) as db:
         row = db.execute(
             "SELECT id, note_path FROM papers WHERE lower(doi)=lower(?)", (doi,)
@@ -137,15 +171,13 @@ def save_ingestion(
     stored_path: Path,
     extracted_text: str,
 ) -> None:
-    fields = {"doi", "title", "year", "authors", "venue", "url", "abstract"}
+    """Upsert a paper, its document, and its ingestion job in one transaction."""
+    extras = {
+        key: value for key, value in metadata.items() if key not in _METADATA_FIELDS
+    }
     with sqlite3.connect(database_path) as db:
         db.execute(
-            """INSERT INTO papers(id, doi, title, year, authors_json, venue, url, abstract, metadata_json)
-               VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
-               ON CONFLICT(id) DO UPDATE SET
-                 doi=COALESCE(excluded.doi, papers.doi),
-                 title=CASE WHEN papers.title IS NULL OR papers.title='' THEN excluded.title ELSE papers.title END,
-                 updated_at=CURRENT_TIMESTAMP""",
+            _SAVE_PAPER_SQL,
             (
                 paper_id,
                 metadata.get("doi"),
@@ -155,13 +187,11 @@ def save_ingestion(
                 metadata.get("venue"),
                 metadata.get("url"),
                 metadata.get("abstract"),
-                json.dumps({key: value for key, value in metadata.items() if key not in fields}),
+                json.dumps(extras),
             ),
         )
         db.execute(
-            """INSERT OR IGNORE INTO documents
-               (id, paper_id, sha256, original_name, stored_path, extracted_text)
-               VALUES(?,?,?,?,?,?)""",
+            _INSERT_DOCUMENT_SQL,
             (digest[:24], paper_id, digest, filename, str(stored_path), extracted_text),
         )
         db.execute(
@@ -171,6 +201,7 @@ def save_ingestion(
 
 
 def set_paper_note_path(database_path: Path, paper_id: str, note_path: Path) -> None:
+    """Record the rendered note path for a paper."""
     with sqlite3.connect(database_path) as db:
         db.execute(
             "UPDATE papers SET note_path=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
@@ -178,32 +209,10 @@ def set_paper_note_path(database_path: Path, paper_id: str, note_path: Path) -> 
         )
 
 
-def insert_resolved_citations(
-    database_path: Path, paper_id: str, citations: list[CitationRecord]
-) -> None:
-    with sqlite3.connect(database_path) as db:
-        db.executemany(
-            """INSERT OR IGNORE INTO citations
-               (source_paper_id, target_paper_id, raw_reference, cited_doi, status, confidence, evidence)
-               VALUES(?,?,?,?,?,?,?)""",
-            [
-                (
-                    paper_id,
-                    citation.get("target_id"),
-                    citation["raw_reference"],
-                    citation.get("doi"),
-                    citation.get("status", "unresolved"),
-                    citation.get("confidence", 0.0),
-                    "GROBID bibliography extraction",
-                )
-                for citation in citations
-            ],
-        )
-
-
 def record_ingestion_failure(
     database_path: Path, digest: str, filename: str, error: str
 ) -> None:
+    """Record a failed ingestion attempt for later inspection."""
     with sqlite3.connect(database_path) as db:
         db.execute(
             "INSERT INTO ingestion_jobs(sha256, filename, status, error) VALUES(?,?,?,?)",
@@ -212,11 +221,7 @@ def record_ingestion_failure(
 
 
 def unresolved_citations(database_path: Path) -> list[PendingCitation]:
+    """Return citations that still need human review, with their source titles."""
     with sqlite3.connect(database_path) as db:
-        rows = db.execute(
-            """SELECT p.title, c.raw_reference, c.cited_doi, c.status
-               FROM citations c JOIN papers p ON p.id=c.source_paper_id
-               WHERE c.status IN ('unresolved', 'ambiguous', 'external')
-               ORDER BY p.title"""
-        ).fetchall()
+        rows = db.execute(_UNRESOLVED_CITATIONS_SQL).fetchall()
     return [PendingCitation(*row) for row in rows]

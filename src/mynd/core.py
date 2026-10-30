@@ -287,29 +287,21 @@ def _reference_error_detail(exc: Exception) -> str:
     return f"GROBID reference extraction failed: {exc}"
 
 
-def ingest_inbox(
-    settings: Settings,
-    crossref: CrossrefClient | None = None,
-    *,
-    verbose: bool = False,
-) -> list[dict[str, Any]]:
-    def report(message: str) -> None:
-        print(f"[ingest] {message}", file=sys.stderr, flush=True)
+def _stderr_report(message: str) -> None:
+    print(f"[ingest] {message}", file=sys.stderr, flush=True)
 
-    settings.inbox_path.mkdir(parents=True, exist_ok=True)
-    settings.vault_path.mkdir(parents=True, exist_ok=True)
-    initialize_database(settings.database_path)
 
-    pdfs = sorted(settings.inbox_path.glob("*.pdf"))
-    report(f"Found {len(pdfs)} PDF{'s' if len(pdfs) != 1 else ''} in {settings.inbox_path}")
-    if not pdfs:
-        return []
-
-    # Ensure the LLM is ready for future summarization.
+def _prepare_runtime(
+    settings: Settings, report: Callable[[str], None], verbose: bool
+) -> tuple[RuntimeControl, SummaryWriter | None]:
+    """Start runtime control and resolve the summarizer for this batch."""
     runtime_control = RuntimeControl(settings.data_path / ".mynd-mode")
     report(f"Inference mode: {runtime_control.mode()}")
     if settings.use_local_llm and not MacThermalMonitor.supported():
-        report(f"Automatic thermal response is not implemented for {sys.platform}; mode limits still work")
+        report(
+            f"Automatic thermal response is not implemented for {sys.platform}; "
+            "mode limits still work"
+        )
     if settings.use_local_llm and verbose:
         runtime_control.report_thermal_state("ingestion start", report)
 
@@ -321,28 +313,65 @@ def ingest_inbox(
     )
     report(f"Checking summarization model availability ({manager.model})")
     if not manager.ensure_model():
-        report(f"Model {manager.model} is unavailable; continuing ingestion without summarization")
-        summarizer = None
-    else:
-        report(f"Summarization model ready: {manager.model}")
-        summarizer = SummaryWriter(manager)
+        report(
+            f"Model {manager.model} is unavailable; continuing ingestion without summarization"
+        )
+        return runtime_control, None
+    report(f"Summarization model ready: {manager.model}")
+    return runtime_control, SummaryWriter(manager)
 
-    results = []
+
+def _ingest_batch(
+    pdfs: list[Path],
+    settings: Settings,
+    crossref: CrossrefClient | None,
+    summarizer: SummaryWriter | None,
+    report: Callable[[str], None],
+    runtime_control: RuntimeControl,
+    verbose: bool,
+) -> list[dict[str, Any]]:
+    """Ingest each PDF, isolating failures so one document cannot abort the batch."""
+    results: list[dict[str, Any]] = []
     for index, pdf in enumerate(pdfs, start=1):
-        report(f"PDF {index}/{len(pdfs)}: {pdf.name}")
+        progress_label = f"PDF {index}/{len(pdfs)}"
+        report(f"{progress_label}: {pdf.name}")
         try:
-            result = ingest_pdf(pdf, settings, crossref, progress=report, summarizer=summarizer)
-            results.append(result)
-            report(f"Finished PDF {index}/{len(pdfs)}: {pdf.name} ({result['status']})")
-            if settings.use_local_llm and verbose:
-                runtime_control.report_thermal_state(f"PDF {index}/{len(pdfs)}", report)
-        except Exception as exc:  # noqa: BLE001 - isolate failures so one PDF cannot abort the batch
+            result = ingest_pdf(
+                pdf, settings, crossref, progress=report, summarizer=summarizer
+            )
+            report(f"Finished {progress_label}: {pdf.name} ({result['status']})")
+        except Exception as exc:  # noqa: BLE001 - isolate failures per document
             record_ingestion_failure(
                 settings.database_path, sha256_file(pdf), pdf.name, str(exc)
             )
-            results.append({"status": "failed", "filename": pdf.name, "error": str(exc)})
-            report(f"Failed PDF {index}/{len(pdfs)}: {pdf.name}: {exc}")
-            if settings.use_local_llm and verbose:
-                runtime_control.report_thermal_state(f"PDF {index}/{len(pdfs)} failure", report)
+            result = {"status": "failed", "filename": pdf.name, "error": str(exc)}
+            report(f"Failed {progress_label}: {pdf.name}: {exc}")
+            progress_label += " failure"
+        results.append(result)
+        if settings.use_local_llm and verbose:
+            runtime_control.report_thermal_state(progress_label, report)
     return results
+
+
+def ingest_inbox(
+    settings: Settings,
+    crossref: CrossrefClient | None = None,
+    *,
+    verbose: bool = False,
+) -> list[dict[str, Any]]:
+    """Process every PDF in the configured inbox."""
+    report = _stderr_report
+    settings.inbox_path.mkdir(parents=True, exist_ok=True)
+    settings.vault_path.mkdir(parents=True, exist_ok=True)
+    initialize_database(settings.database_path)
+
+    pdfs = sorted(settings.inbox_path.glob("*.pdf"))
+    report(f"Found {len(pdfs)} PDF{'s' if len(pdfs) != 1 else ''} in {settings.inbox_path}")
+    if not pdfs:
+        return []
+
+    runtime_control, summarizer = _prepare_runtime(settings, report, verbose)
+    return _ingest_batch(
+        pdfs, settings, crossref, summarizer, report, runtime_control, verbose
+    )
 

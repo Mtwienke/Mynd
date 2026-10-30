@@ -2,9 +2,21 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from ai.base import TextGenerator
 from ai.hosted import HostedGenerator
-from ai.local import OllamaGenerator
+from ai.local import OllamaConfig, OllamaGenerator
 from ai.models import get_model_manager
+
+
+def test_text_generator_protocol_accepts_concrete_backends():
+    assert isinstance(HostedGenerator(), TextGenerator)
+
+
+def test_text_generator_protocol_rejects_incomplete_backends():
+    class Incomplete:
+        pass
+
+    assert not isinstance(Incomplete(), TextGenerator)
 
 
 def test_get_model_manager_local():
@@ -23,7 +35,7 @@ def test_hosted_generator_stub_behavior():
 
 
 def test_ollama_generator_is_running_true():
-    gen = OllamaGenerator(model="mistral")
+    gen = OllamaGenerator(OllamaConfig(model="mistral"))
     response = MagicMock()
     response.json.return_value = {"models": [{"name": "mistral"}]}
     gen.client = MagicMock()
@@ -32,7 +44,7 @@ def test_ollama_generator_is_running_true():
 
 
 def test_ollama_generator_is_running_false_for_other_model():
-    gen = OllamaGenerator(model="mistral")
+    gen = OllamaGenerator(OllamaConfig(model="mistral"))
     response = MagicMock()
     response.json.return_value = {"models": [{"name": "different"}]}
     gen.client = MagicMock()
@@ -41,20 +53,20 @@ def test_ollama_generator_is_running_false_for_other_model():
 
 
 def test_ollama_generator_is_running_handles_http_error():
-    gen = OllamaGenerator(model="mistral")
+    gen = OllamaGenerator(OllamaConfig(model="mistral"))
     gen.client = MagicMock()
     gen.client.get.side_effect = __import__("httpx").HTTPError("down")
     assert gen.is_running() is False
 
 
 def test_ollama_generator_ensure_model_already_running():
-    gen = OllamaGenerator(model="mistral")
+    gen = OllamaGenerator(OllamaConfig(model="mistral"))
     with patch.object(OllamaGenerator, "is_running", return_value=True):
         assert gen.ensure_model() is True
 
 
 def test_ollama_generator_ensure_model_pulls_with_timeout():
-    gen = OllamaGenerator(model="mistral")
+    gen = OllamaGenerator(OllamaConfig(model="mistral"))
     completed = MagicMock()
     completed.stdout = "pulling\ndone\n"
     completed.stderr = ""
@@ -69,7 +81,7 @@ def test_ollama_generator_ensure_model_pulls_with_timeout():
 
 
 def test_ollama_generator_ensure_model_reports_failure():
-    gen = OllamaGenerator(model="mistral")
+    gen = OllamaGenerator(OllamaConfig(model="mistral"))
     with patch.object(OllamaGenerator, "is_running", return_value=False), patch(
         "ai.local.subprocess.run", side_effect=FileNotFoundError("no ollama")
     ):
@@ -86,7 +98,7 @@ def _stream_context(lines):
 
 
 def test_ollama_generator_generate_collects_stream():
-    gen = OllamaGenerator(model="mistral")
+    gen = OllamaGenerator(OllamaConfig(model="mistral"))
     gen.client = MagicMock()
     gen.client.stream.return_value = _stream_context(
         ['{"response": "Hello "}', '{"response": "world", "done": true}']
@@ -95,7 +107,7 @@ def test_ollama_generator_generate_collects_stream():
 
 
 def test_ollama_generator_generate_empty_raises():
-    gen = OllamaGenerator(model="mistral")
+    gen = OllamaGenerator(OllamaConfig(model="mistral"))
     gen.client = MagicMock()
     gen.client.stream.return_value = _stream_context(['{"done": true}'])
     with pytest.raises(ValueError, match="empty response"):
@@ -103,7 +115,7 @@ def test_ollama_generator_generate_empty_raises():
 
 
 def test_ollama_generator_generate_propagates_error_field():
-    gen = OllamaGenerator(model="mistral")
+    gen = OllamaGenerator(OllamaConfig(model="mistral"))
     gen.client = MagicMock()
     gen.client.stream.return_value = _stream_context(['{"error": "boom"}'])
     with pytest.raises(RuntimeError, match="boom"):
