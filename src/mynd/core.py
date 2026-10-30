@@ -4,30 +4,29 @@ import hashlib
 import re
 import shutil
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import httpx
 from defusedxml import ElementTree as ET
 
 from ai.models import get_model_manager
-from ai.summarize import SummaryWriter
 from ai.runtime import MacThermalMonitor, RuntimeControl
+from ai.summarize import SummaryWriter
 from ingestion.extract_references import extract_grobid_references
 from ingestion.extract_text import extract_pdf
+from resolution.citations import resolve_extracted_references
 from resolution.crossref import CrossrefClient, metadata_from_crossref
-from resolution.citations import CitationRecord, resolve_extracted_references
-from resolution.doi import normalize_doi
 from resolution.metadata import PaperMetadata
+from storage.database import initialize_database
 from storage.repositories import (
     citations_for_paper,
     document_for_digest,
     extracted_text_for_document,
-    insert_extracted_citations,
     insert_resolved_citations,
     metadata_for_paper,
-    paper_for_doi,
     paper_id_for_doi,
     record_ingestion_failure,
     save_ingestion,
@@ -35,9 +34,10 @@ from storage.repositories import (
     unresolved_citations,
     update_document_path,
 )
-from storage.database import initialize_database
 from vault.note_writer import (
     link_summary_citations as _link_summary_citations,
+)
+from vault.note_writer import (
     write_paper_note,
     write_reference_placeholder,
 )
@@ -107,22 +107,12 @@ def _text_without_references(text: str) -> str:
     return text
 
 
-init_db = initialize_database
-
-
 def _paper_id(doi: str | None, digest: str) -> str:
     if doi:
         return "doi-" + hashlib.sha1(
             doi.lower().encode(), usedforsecurity=False
         ).hexdigest()[:12]
     return "paper-" + digest[:16]
-
-
-write_note = write_paper_note
-
-
-def _citation_records(settings: Settings, paper_id: str) -> list[CitationRecord]:
-    return citations_for_paper(settings.database_path, paper_id)
 
 
 def ingest_pdf(
@@ -137,7 +127,7 @@ def ingest_pdf(
     if not pdf_path.exists() or pdf_path.suffix.lower() != ".pdf":
         raise ValueError(f"Not a PDF file: {pdf_path}")
 
-    init_db(settings.database_path)
+    initialize_database(settings.database_path)
     digest = sha256_file(pdf_path)
     settings.pdf_store_path.mkdir(parents=True, exist_ok=True)
     stored_pdf = settings.pdf_store_path / f"{digest[:16]}{pdf_path.suffix.lower()}"
@@ -157,7 +147,6 @@ def ingest_pdf(
             "authors": [],
         }
         status = "already_ingested"
-        extracted_text_path = _save_extracted_text(settings.data_path, source_pdf, text)
         report(f"Already ingested: {pdf_path.name}; refreshing note and references")
     else:
         if not stored_pdf.exists():
@@ -166,7 +155,6 @@ def ingest_pdf(
         source_pdf = stored_pdf
         report("Extracting text and DOI from PDF")
         text, doi = extract_pdf(source_pdf)
-        extracted_text_path = _save_extracted_text(settings.data_path, source_pdf, text)
         metadata: PaperMetadata = {
             "doi": doi,
             "title": pdf_path.stem,
@@ -197,7 +185,39 @@ def ingest_pdf(
         )
         status = "ingested"
 
+    return _finalize_ingestion(
+        settings,
+        crossref,
+        summarizer,
+        report,
+        paper_id=paper_id,
+        metadata=metadata,
+        source_pdf=source_pdf,
+        text=text,
+        status=status,
+        is_refresh=existing is not None,
+        metadata_error=metadata_error,
+    )
+
+
+def _finalize_ingestion(
+    settings: Settings,
+    crossref: CrossrefClient | None,
+    summarizer: SummaryWriter | None,
+    report: Callable[[str], None],
+    *,
+    paper_id: str,
+    metadata: PaperMetadata,
+    source_pdf: Path,
+    text: str,
+    status: str,
+    is_refresh: bool,
+    metadata_error: str | None,
+) -> dict[str, Any]:
+    """Persist extracted text, resolve references, summarize, and write the note."""
+    extracted_text_path = _save_extracted_text(settings.data_path, source_pdf, text)
     report(f"Saved full extracted text: {extracted_text_path}")
+
     references_error = None
     citation_errors: list[str] = []
     if settings.use_grobid:
@@ -210,9 +230,9 @@ def ingest_pdf(
             insert_resolved_citations(settings.database_path, paper_id, citations)
         except (httpx.HTTPError, ET.ParseError, OSError) as exc:
             references_error = _reference_error_detail(exc)
-            citations = _citation_records(settings, paper_id) if existing else []
+            citations = citations_for_paper(settings.database_path, paper_id) if is_refresh else []
     else:
-        citations = _citation_records(settings, paper_id) if existing else []
+        citations = citations_for_paper(settings.database_path, paper_id) if is_refresh else []
 
     summary = None
     if summarizer and text:
@@ -233,7 +253,9 @@ def ingest_pdf(
     summary = _link_summary_citations(summary, citations, settings.vault_path)
 
     report("Writing Obsidian note")
-    note = write_note(settings.vault_path, paper_id, metadata, source_pdf, citations, summary)
+    note = write_paper_note(
+        settings.vault_path, paper_id, metadata, source_pdf, citations, summary
+    )
     set_paper_note_path(settings.database_path, paper_id, note)
 
     result = {
@@ -265,7 +287,7 @@ def _reference_error_detail(exc: Exception) -> str:
     return f"GROBID reference extraction failed: {exc}"
 
 
-def process_inbox(
+def ingest_inbox(
     settings: Settings,
     crossref: CrossrefClient | None = None,
     *,
@@ -276,7 +298,7 @@ def process_inbox(
 
     settings.inbox_path.mkdir(parents=True, exist_ok=True)
     settings.vault_path.mkdir(parents=True, exist_ok=True)
-    init_db(settings.database_path)
+    initialize_database(settings.database_path)
 
     pdfs = sorted(settings.inbox_path.glob("*.pdf"))
     report(f"Found {len(pdfs)} PDF{'s' if len(pdfs) != 1 else ''} in {settings.inbox_path}")
@@ -314,7 +336,7 @@ def process_inbox(
             report(f"Finished PDF {index}/{len(pdfs)}: {pdf.name} ({result['status']})")
             if settings.use_local_llm and verbose:
                 runtime_control.report_thermal_state(f"PDF {index}/{len(pdfs)}", report)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - isolate failures so one PDF cannot abort the batch
             record_ingestion_failure(
                 settings.database_path, sha256_file(pdf), pdf.name, str(exc)
             )
@@ -327,7 +349,7 @@ def process_inbox(
 
 def write_review_queue(settings: Settings) -> Path:
     """Write unresolved/ambiguous citation records to a human-review note."""
-    init_db(settings.database_path)
+    initialize_database(settings.database_path)
     output = settings.vault_path / "90 System" / "Citation Review Queue.md"
     output.parent.mkdir(parents=True, exist_ok=True)
     rows = unresolved_citations(settings.database_path)

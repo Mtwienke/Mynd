@@ -1,10 +1,10 @@
-from pathlib import Path
 import json
+from pathlib import Path
 
 import typer
 
 from ai.runtime import RuntimeControl
-from mynd.core import CrossrefClient, load_settings, process_inbox, write_review_queue
+from mynd.core import CrossrefClient, ingest_inbox, load_settings, write_review_queue
 
 app = typer.Typer(help="Local-first research library for Obsidian.")
 
@@ -35,7 +35,7 @@ def ingest(
             raise typer.BadParameter(str(exc)) from exc
     client = CrossrefClient(settings.crossref_email)
     try:
-        results = process_inbox(settings, client, verbose=verbose)
+        results = ingest_inbox(settings, client, verbose=verbose)
     finally:
         client.close()
     for result in results:

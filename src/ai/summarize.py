@@ -1,12 +1,15 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
-from typing import Callable
+import logging
+from collections.abc import Callable
+from dataclasses import dataclass
 
 from ai.base import TextGenerator
 from resolution.citations import CitationRecord
 from resolution.metadata import PaperMetadata
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -92,15 +95,18 @@ Paper metadata:\n{context or 'Not provided'}\n\nBibliography entries:\n{entries}
             result = self.generator.generate(prompt).strip()
             result = result.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
             annotations = json.loads(result)
-            for item in annotations:
-                index = item.get("index")
-                if isinstance(index, int) and 0 <= index < len(references):
-                    ref = references[index]
-                    ref["importance"] = item.get("importance")
-                    ref["similarity"] = item.get("similarity")
-                    ref["direction"] = ", ".join(item.get("directions", []))
-        except (ValueError, TypeError, AttributeError):
-            pass
+        except json.JSONDecodeError as exc:
+            # Only malformed optional annotation output is recoverable; model and
+            # network failures propagate to the ingestion failure boundary.
+            logger.warning("Skipping reference annotations; model returned invalid JSON: %s", exc)
+            return references
+        for item in annotations:
+            index = item.get("index")
+            if isinstance(index, int) and 0 <= index < len(references):
+                ref = references[index]
+                ref["importance"] = item.get("importance")
+                ref["similarity"] = item.get("similarity")
+                ref["direction"] = ", ".join(item.get("directions", []))
         return references
 
     def _chunks(self, text: str) -> list[str]:

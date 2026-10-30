@@ -1,9 +1,9 @@
+from __future__ import annotations
+
 import json
 import sqlite3
 from pathlib import Path
-from typing import Any
-
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from resolution.citations import CitationRecord

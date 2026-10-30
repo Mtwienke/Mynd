@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from .local import OllamaGenerator
-from .hosted import HostedGenerator
 from .base import TextGenerator
+from .hosted import HostedGenerator
+from .local import OllamaGenerator
+
 
 def get_model_manager(use_local: bool = True, runtime_control=None, progress=None, verbose: bool = False) -> TextGenerator:
     if use_local:

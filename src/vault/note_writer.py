@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-import re
 import hashlib
+import re
 from pathlib import Path
+
 from resolution.citations import CitationRecord
-from resolution.metadata import PaperMetadata
 from resolution.doi import normalize_doi
+from resolution.metadata import PaperMetadata
 
 
 def _slug(text: str) -> str:

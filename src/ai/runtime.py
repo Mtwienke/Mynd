@@ -3,15 +3,30 @@ from __future__ import annotations
 
 import ctypes
 import ctypes.util
-from datetime import datetime
 import json
 import os
 import platform
 import shutil
-import subprocess
+import subprocess  # nosec B404 - used only for the trusted local `macmon` CLI
 import time
+from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
-from typing import Callable
+from typing import ClassVar, TypedDict, cast
+
+
+class FanReading(TypedDict, total=False):
+    """One fan entry reported by the `macmon` CLI."""
+
+    name: str
+    rpm: float
+
+
+class SensorSnapshot(TypedDict, total=False):
+    """Open-ended hardware metrics payload produced by `macmon`."""
+
+    temp: dict[str, float]
+    fans: list[FanReading]
 
 
 class MacThermalMonitor:
@@ -81,14 +96,14 @@ class MacHardwareMonitor:
     """Read Apple Silicon temperatures and fan RPM through the optional macmon CLI."""
 
     @staticmethod
-    def snapshot() -> tuple[dict | None, str | None]:
+    def snapshot() -> tuple[SensorSnapshot | None, str | None]:
         if platform.system() != "Darwin":
             return None, "real temperature/fan readings are only implemented for macOS"
         executable = shutil.which("macmon")
         if not executable:
             return None, "macmon is not installed (install with `brew install macmon`)"
         try:
-            result = subprocess.run(
+            result = subprocess.run(  # nosec B603 - fixed args, resolved executable, timeout set
                 [executable, "pipe", "--samples", "1", "--interval", "500"],
                 check=True,
                 capture_output=True,
@@ -100,10 +115,10 @@ class MacHardwareMonitor:
             return None, f"macmon read failed: {exc}"
         if not isinstance(data, dict):
             return None, "macmon returned an unexpected metrics format"
-        return data, None
+        return cast(SensorSnapshot, data), None
 
     @staticmethod
-    def format_readings(data: dict | None, error: str | None) -> str:
+    def format_readings(data: SensorSnapshot | None, error: str | None) -> str:
         if data is None:
             return error or "sensor readings unavailable"
         temps = data.get("temp") or {}
@@ -125,7 +140,7 @@ class MacHardwareMonitor:
         return "; ".join(values)
 
     @staticmethod
-    def fan_rpms(data: dict | None) -> list[float]:
+    def fan_rpms(data: SensorSnapshot | None) -> list[float]:
         if not data:
             return []
         return [
@@ -138,22 +153,22 @@ class MacHardwareMonitor:
 class RuntimeControl:
     """Shared mode file and thermal policy used by a running ingestion job."""
 
-    VALID_MODES = {"normal", "silent"}
-    HOT_STATES = {"serious", "critical"}
+    VALID_MODES: ClassVar[frozenset[str]] = frozenset({"normal", "silent"})
+    HOT_STATES: ClassVar[frozenset[str]] = frozenset({"serious", "critical"})
 
     def __init__(self, state_path: Path):
         self.state_path = state_path
-        self._sensor_snapshot: dict | None = None
+        self._sensor_snapshot: SensorSnapshot | None = None
         self._sensor_error: str | None = None
         self._sensor_read_at = 0.0
 
-    def hardware_snapshot(self, refresh: bool = False) -> tuple[dict | None, str | None]:
+    def hardware_snapshot(self, refresh: bool = False) -> tuple[SensorSnapshot | None, str | None]:
         if refresh or time.monotonic() - self._sensor_read_at >= 2.0:
             self._sensor_snapshot, self._sensor_error = MacHardwareMonitor.snapshot()
             self._sensor_read_at = time.monotonic()
         return self._sensor_snapshot, self._sensor_error
 
-    def fan_active(self, snapshot: dict | None = None) -> bool:
+    def fan_active(self, snapshot: SensorSnapshot | None = None) -> bool:
         if snapshot is None:
             snapshot, _error = self.hardware_snapshot()
         return any(rpm > 0 for rpm in MacHardwareMonitor.fan_rpms(snapshot))

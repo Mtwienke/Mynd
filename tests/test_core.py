@@ -1,14 +1,13 @@
 import hashlib
 import sqlite3
+
 import pymupdf
 
-from mynd.core import (
-    extract_pdf,
-    init_db,
-    normalize_doi,
-    sha256_file,
-    write_note,
-)
+from ingestion.extract_text import extract_pdf
+from mynd.core import sha256_file
+from resolution.doi import normalize_doi
+from storage.database import initialize_database as init_db
+from vault.note_writer import write_paper_note as write_note
 
 
 def test_normalize_doi():

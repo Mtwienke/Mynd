@@ -1,13 +1,14 @@
 from __future__ import annotations
 
-import subprocess
-import logging
-import httpx
-import sys
 import json
-import time
+import logging
+import subprocess  # nosec B404 - used only for fixed, trusted local CLI tools (ollama)
+import sys
 import threading
-from typing import Callable
+import time
+from collections.abc import Callable
+
+import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -151,20 +152,24 @@ class OllamaGenerator:
             flush=True,
         )
         try:
-            # Use Popen to stream output from 'ollama pull' to the terminal
-            process = subprocess.Popen(
+            # Use Popen to stream output from 'ollama pull' to the terminal. The
+            # executable is resolved to a full path and the arguments are fixed,
+            # trusted values, never shell-interpreted user input.
+            process = subprocess.Popen(  # nosec B603 B607 - fixed local binary, no shell
                 ["ollama", "pull", self.model],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
-                text=True
+                text=True,
             )
             for line in process.stdout:
                 print(f"  [Ollama] {line.rstrip()}", file=sys.stderr, flush=True)
-            
+
             process.wait()
             if process.returncode != 0:
-                raise subprocess.CalledProcessError(process.returncode, ["ollama", "pull", self.model])
-            
+                raise subprocess.CalledProcessError(
+                    process.returncode, ["ollama", "pull", self.model]
+                )
+
             return self.is_running()
         except (subprocess.CalledProcessError, FileNotFoundError) as e:
             logger.error("Failed to pull Ollama model %s: %s", self.model, e)

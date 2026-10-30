@@ -1,13 +1,10 @@
-import pytest
-import os
-import platform
-import subprocess
 import json
-import time
-from pathlib import Path
-from unittest.mock import MagicMock, patch, mock_open
+from unittest.mock import MagicMock, patch
 
-from ai.runtime import RuntimeControl, MacThermalMonitor, MacHardwareMonitor
+import pytest
+
+from ai.runtime import MacHardwareMonitor, MacThermalMonitor, RuntimeControl
+
 
 @pytest.fixture
 def runtime_control(tmp_path):

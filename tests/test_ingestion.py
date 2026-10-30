@@ -1,15 +1,14 @@
-import pytest
-import shutil
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
+
+import pytest
 
 from mynd.core import (
+    ingest_inbox,
     ingest_pdf,
-    process_inbox,
-    Settings,
     load_settings,
 )
-from storage.repositories import paper_for_doi
+
 
 @pytest.fixture
 def mock_settings(tmp_path):
@@ -35,7 +34,7 @@ def test_ingest_pdf_success(mock_settings, sample_pdf):
     """Test the full ingestion pipeline with mocked external dependencies."""
     # Mocking expensive/external components
     with patch("mynd.core.extract_pdf", return_value=("This is the paper text", "10.1234/test")), \
-         patch("mynd.core.write_note", return_value=Path("vault/note.md")), \
+         patch("mynd.core.write_paper_note", return_value=Path("vault/note.md")), \
          patch("mynd.core.sha256_file", return_value="fake-sha256"), \
          patch("storage.repositories.paper_for_doi", return_value=None):
         
@@ -50,7 +49,7 @@ def test_ingest_pdf_already_ingested(mock_settings, sample_pdf):
     """Test that already ingested PDFs are handled correctly (refresh path)."""
     # First ingestion
     with patch("mynd.core.extract_pdf", return_value=("Text", "10.1234/test")), \
-         patch("mynd.core.write_note", return_value=Path("vault/note.md")), \
+         patch("mynd.core.write_paper_note", return_value=Path("vault/note.md")), \
          patch("mynd.core.sha256_file", return_value="fake-sha256"):
         
         ingest_pdf(sample_pdf, mock_settings)
@@ -60,8 +59,8 @@ def test_ingest_pdf_already_ingested(mock_settings, sample_pdf):
         
         assert result["status"] == "already_ingested"
 
-def test_process_inbox_workflow(mock_settings, tmp_path):
-    """Test that process_inbox discovers PDFs and calls ingest_pdf."""
+def test_ingest_inbox_workflow(mock_settings, tmp_path):
+    """Test that ingest_inbox discovers PDFs and calls ingest_pdf."""
     inbox = mock_settings.inbox_path
     inbox.mkdir(parents=True, exist_ok=True)
     
@@ -75,7 +74,7 @@ def test_process_inbox_workflow(mock_settings, tmp_path):
         
         mock_ingest.return_value = {"status": "ingested", "paper_id": "123", "doi": "doi", "title": "title", "note": Path("n"), "references_extracted": 0, "extracted_text": Path("t")}
         
-        results = process_inbox(mock_settings)
+        results = ingest_inbox(mock_settings)
         
         assert len(results) == 2
         assert mock_ingest.call_count == 2

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+
 class HostedGenerator:
     """Placeholder for hosted model management."""
 
