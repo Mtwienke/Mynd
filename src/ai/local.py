@@ -172,33 +172,22 @@ class OllamaGenerator:
             return False
 
     def generate(self, prompt: str) -> str:
-        if self.runtime_control is None:
-            payload = {"model": self.model, "prompt": prompt, "stream": False}
-            self._report_request(payload)
-            response = self.client.post("/api/generate", json=payload)
-            response.raise_for_status()
-            data = response.json()
-            self._report_response(data)
-            result = data.get("response", "").strip()
-            if not result:
-                raise ValueError("Ollama returned an empty response")
-            return result
-
+        runtime = self.runtime_control
         while True:
-            self.runtime_control.wait_until_safe(self.progress)
-            thermal_at_start = self.runtime_control.thermal_state()
-            if thermal_at_start in self.runtime_control.HOT_STATES:
-                continue
-            mode_at_start = self.runtime_control.mode()
-            sensor_snapshot, _sensor_error = self.runtime_control.hardware_snapshot()
-            fan_active = (
-                mode_at_start == "silent"
-                and self.runtime_control.fan_active(sensor_snapshot)
-            )
+            mode_at_start = None
+            if runtime is not None:
+                runtime.wait_until_safe(self.progress)
+                if runtime.thermal_state() in runtime.HOT_STATES:
+                    runtime.wait_until_safe(self.progress)
+                    continue
+                mode_at_start = runtime.mode()
+                sensor_snapshot, _sensor_error = runtime.hardware_snapshot()
+                fan_active = mode_at_start == "silent" and runtime.fan_active(sensor_snapshot)
+            else:
+                fan_active = False
+
             payload = {"model": self.model, "prompt": prompt, "stream": True}
-            options = self.runtime_control.ollama_options(
-                mode_at_start, fan_active
-            )
+            options = runtime.ollama_options(mode_at_start, fan_active) if runtime else {}
             if fan_active:
                 self.progress(
                     "Fan speed is above 0 RPM; using extra-low inference limits "
@@ -212,7 +201,7 @@ class OllamaGenerator:
             pieces = []
             interrupted = False
             final_item = {}
-            monitor = self._start_runtime_monitor() if self.verbose else None
+            monitor = self._start_runtime_monitor() if runtime and self.verbose else None
             try:
                 with self.client.stream("POST", "/api/generate", json=payload) as response:
                     response.raise_for_status()
@@ -228,13 +217,13 @@ class OllamaGenerator:
                             final_item = item
                             break
 
-                        thermal = self.runtime_control.thermal_state()
-                        if thermal in self.runtime_control.HOT_STATES:
-                            interrupted = True
-                            break
-                        if thermal == "fair" and mode_at_start != "silent":
-                            interrupted = True
-                            break
+                        if runtime is not None:
+                            thermal = runtime.thermal_state()
+                            if thermal in runtime.HOT_STATES or (
+                                thermal == "fair" and mode_at_start != "silent"
+                            ):
+                                interrupted = True
+                                break
             finally:
                 if monitor is not None:
                     stop, thread, report_if_changed = monitor
@@ -244,16 +233,14 @@ class OllamaGenerator:
 
             if interrupted:
                 self.progress("Thermal state changed; restarting this model request with safe limits")
-                self.runtime_control.wait_until_safe(self.progress)
+                runtime.wait_until_safe(self.progress)
                 continue
             result = "".join(pieces).strip()
             if not result:
                 raise ValueError("Ollama returned an empty response")
             self._report_response(final_item)
-            if self.verbose and self.runtime_control is not None:
-                self.runtime_control.report_thermal_state(
-                    "model request complete", self.progress
-                )
+            if self.verbose and runtime is not None:
+                runtime.report_thermal_state("model request complete", self.progress)
             return result
 
     def close(self) -> None:

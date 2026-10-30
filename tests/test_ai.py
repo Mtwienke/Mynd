@@ -1,4 +1,3 @@
-import pytest
 from unittest.mock import MagicMock, patch
 from src.ai.models import get_model_manager
 from src.ai.local import OllamaGenerator

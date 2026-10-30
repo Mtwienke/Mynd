@@ -1,11 +1,8 @@
 import hashlib
 import sqlite3
-from pathlib import Path
-
 import pymupdf
 
 from mynd.core import (
-    Settings,
     extract_pdf,
     init_db,
     normalize_doi,

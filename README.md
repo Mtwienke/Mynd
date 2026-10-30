@@ -76,10 +76,10 @@ Keep that process running, then ingest PDFs. If GROBID is unavailable, the PDF a
 - The prototype finds a DOI in extracted PDF text and enriches metadata via Crossref.
 - Citation extraction requires GROBID; reference resolution is strongest when a DOI is present.
 - References to papers not yet in the vault are marked `external`, not automatically downloaded.
-- The first version does not generate AI summaries or quizzes.
+- When the configured model is available, ingestion creates an AI summary and tentative reference annotations. If it is unavailable, ingestion continues and the note records that no summary was generated. Quizzes are not implemented.
 - Scanned PDFs may require OCR.
 - PDF processing and API responses should be tested against your own paper collection before relying on the generated graph.
 
 ## Privacy
 
-PDFs and SQLite data are stored locally. Crossref receives DOI lookup requests. When GROBID is run locally, the PDF is sent to that local service. This version does not send paper text to an LLM.
+PDFs, extracted text, and SQLite data are stored locally. Crossref receives DOI lookup requests, and a locally run GROBID service receives the PDF for bibliography extraction. With the default local model setting, extracted paper text (excluding a terminal bibliography) is sent to the configured Ollama model on your machine for summarization and reference annotation. If the hosted-model setting is selected, the current hosted backend is a placeholder and reports itself unavailable, so summarization is skipped.

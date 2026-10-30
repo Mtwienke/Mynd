@@ -1,22 +1,15 @@
 from pathlib import Path
-import hashlib
+
 import pymupdf
 
+from resolution.doi import normalize_doi
 
-def extract_pdf(path: Path) -> dict:
-    digest = hashlib.sha256(path.read_bytes()).hexdigest()
 
+def extract_pdf(path: Path) -> tuple[str, str | None]:
+    """Return extracted text and the first DOI found in PDF metadata or text."""
     with pymupdf.open(path) as pdf:
-        pages = [
-            {
-                "page": i + 1,
-                "text": page.get_text("text"),
-            }
-            for i, page in enumerate(pdf)
-        ]
-
-    return {
-        "sha256": digest,
-        "page_count": len(pages),
-        "pages": pages,
-    }
+        metadata = pdf.metadata or {}
+        text = "\n\n".join(page.get_text("text") for page in pdf)
+    candidates = (metadata.get("subject", ""), metadata.get("keywords", ""), text[:30000])
+    doi = next((found for item in candidates if (found := normalize_doi(item))), None)
+    return text, doi

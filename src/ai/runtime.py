@@ -201,11 +201,9 @@ class RuntimeControl:
         if selected_mode != "silent":
             return {}
         cores = os.cpu_count() or 2
-        if selected_mode == "silent" and fan_active:
+        if fan_active:
             return {"num_thread": 1, "num_batch": 32, "num_gpu": 0}
-        if selected_mode == "silent":
-            return {"num_thread": max(1, cores // 4), "num_batch": 64}
-        return {"num_thread": max(1, cores // 2), "num_batch": 128}
+        return {"num_thread": max(1, cores // 4), "num_batch": 64}
 
     def wait_until_safe(
         self,

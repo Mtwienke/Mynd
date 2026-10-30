@@ -5,6 +5,8 @@ import json
 from typing import Callable
 
 from ai.base import TextGenerator
+from resolution.citations import CitationRecord
+from resolution.metadata import PaperMetadata
 
 
 @dataclass
@@ -29,7 +31,7 @@ class SummaryWriter:
     def summarize(
         self,
         text: str,
-        metadata: dict | None = None,
+        metadata: PaperMetadata | None = None,
         progress: Callable[[str], None] | None = None,
     ) -> str:
         """Return a concise Markdown summary, grounded in the supplied paper text."""
@@ -76,9 +78,9 @@ Source material:
     def annotate_references(
         self,
         text: str,
-        references: list[dict],
-        metadata: dict | None = None,
-    ) -> list[dict]:
+        references: list[CitationRecord],
+        metadata: PaperMetadata | None = None,
+    ) -> list[CitationRecord]:
         """Add tentative reading cues to extracted references, grounded in the paper text."""
         if not references:
             return references
@@ -118,7 +120,7 @@ Paper metadata:\n{context or 'Not provided'}\n\nBibliography entries:\n{entries}
         return [chunk for chunk in chunks if chunk]
 
     @staticmethod
-    def _metadata_context(metadata: dict) -> str:
+    def _metadata_context(metadata: PaperMetadata) -> str:
         fields = ("title", "authors", "year", "venue", "doi", "abstract")
         return "\n".join(
             f"{key}: {value}" for key in fields
