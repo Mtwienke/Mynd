@@ -1,4 +1,4 @@
-from typing import TypedDict
+from typing import Required, TypedDict
 
 
 class PaperMetadata(TypedDict, total=False):
@@ -12,3 +12,11 @@ class PaperMetadata(TypedDict, total=False):
     url: str | None
     abstract: str | None
     type: str | None
+
+
+class ReferenceRecord(TypedDict, total=False):
+    """One bibliography entry extracted from a PDF, before resolution."""
+
+    raw_reference: Required[str]
+    doi: str | None
+    title: str | None

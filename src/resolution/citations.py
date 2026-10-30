@@ -1,10 +1,11 @@
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Required, TypedDict
+from typing import Required, TypedDict
 
 import httpx
 
 from resolution.crossref import CrossrefClient
+from resolution.metadata import ReferenceRecord
 
 
 class CitationRecord(TypedDict, total=False):
@@ -24,7 +25,7 @@ class CitationRecord(TypedDict, total=False):
 
 
 def resolve_extracted_references(
-    references: list[dict[str, Any]],
+    references: list[ReferenceRecord],
     local_lookup: Callable[[str], tuple[str, str | None] | None],
     crossref: CrossrefClient | None,
 ) -> tuple[list[CitationRecord], list[str]]:
