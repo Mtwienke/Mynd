@@ -1,6 +1,7 @@
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 
 from mynd.core import ingest_inbox, ingest_pdf
@@ -55,6 +56,20 @@ def test_ingest_pdf_already_ingested(mock_settings, sample_pdf):
         result = ingest_pdf(sample_pdf, mock_settings)
         
         assert result["status"] == "already_ingested"
+
+def test_ingest_pdf_records_metadata_lookup_error(mock_settings, sample_pdf):
+    """A Crossref outage should be reported without aborting local ingestion."""
+    crossref = MagicMock()
+    crossref.by_doi.side_effect = httpx.HTTPError("crossref down")
+    with patch("mynd.core.extract_pdf", return_value=("Text", "10.1234/test")), \
+         patch("mynd.core.write_paper_note", return_value=Path("vault/note.md")), \
+         patch("mynd.core.sha256_file", return_value="digest-error"):
+
+        result = ingest_pdf(sample_pdf, mock_settings, crossref)
+
+    assert result["status"] == "ingested"
+    assert result["metadata_error"] == "crossref down"
+
 
 def test_ingest_inbox_workflow(mock_settings, tmp_path):
     """Test that ingest_inbox discovers PDFs and calls ingest_pdf."""
