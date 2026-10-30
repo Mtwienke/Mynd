@@ -1,0 +1,8 @@
+# Reproducible pins for direct dependencies declared in pyproject.toml.
+# Install with: python -m pip install -c constraints.txt -e ".[dev]"
+defusedxml==0.7.1
+httpx==0.28.1
+pymupdf==1.28.2
+pytest==9.1.1
+ruff==0.17.1
+typer==0.27.3

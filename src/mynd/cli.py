@@ -15,7 +15,10 @@ app = typer.Typer(help="Local-first research library for Obsidian.")
 def settings_from(config: Path) -> Settings:
     if not config.exists():
         raise typer.BadParameter(f"Config file not found: {config}")
-    return load_settings(config)
+    try:
+        return load_settings(config)
+    except (OSError, ValueError, TypeError) as exc:
+        raise typer.BadParameter(f"Invalid config {config}: {exc}") from exc
 
 
 @app.command()
@@ -33,7 +36,7 @@ def ingest(
     settings = settings_from(config)
     if mode is not None:
         try:
-            RuntimeControl(settings.data_path / ".mynd-mode").set_mode(mode)
+            RuntimeControl(settings.mode_file).set_mode(mode)
         except ValueError as exc:
             raise typer.BadParameter(str(exc)) from exc
     client = CrossrefClient(settings.crossref_email)
@@ -54,7 +57,7 @@ def set_mode(
 ) -> None:
     """Change inference mode for a running or future ingestion job."""
     settings = settings_from(config)
-    control = RuntimeControl(settings.data_path / ".mynd-mode")
+    control = RuntimeControl(settings.mode_file)
     try:
         control.set_mode(mode)
     except ValueError as exc:

@@ -4,3 +4,7 @@ __pycache__/
 *.py[cod]
 .DS_Store
 .desloppify/
+
+.pytest_cache/
+.ruff_cache/
+*.egg-info/

@@ -1,13 +1,21 @@
+"""SQLite persistence.
+
+Outward-facing citation and metadata reads return mutable ``TypedDict``
+contracts because callers add annotations before rendering. Internal row
+projections use immutable ``NamedTuple`` or ``dataclass`` types so their
+field order stays tied to the SQL that produces them.
+"""
+
 from __future__ import annotations
 
 import json
 import sqlite3
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, NamedTuple
+from typing import NamedTuple
 
-if TYPE_CHECKING:
-    from resolution.citations import CitationRecord
-    from resolution.metadata import PaperMetadata
+from mynd.contracts import CitationRecord, PaperMetadata
+from storage.database import connect
 
 _INSERT_CITATION_SQL = """\
 INSERT OR IGNORE INTO citations
@@ -61,6 +69,16 @@ class PaperLocation(NamedTuple):
     note_path: str | None
 
 
+@dataclass(frozen=True)
+class IngestedDocument:
+    """One PDF's identity, stored copy, and extracted text."""
+
+    digest: str
+    filename: str
+    stored_path: Path
+    text: str
+
+
 class PendingCitation(NamedTuple):
     """Citation awaiting human review, joined with its source paper title."""
 
@@ -86,15 +104,15 @@ def _citation_row(paper_id: str, citation: CitationRecord) -> tuple:
 def insert_resolved_citations(
     database_path: Path, paper_id: str, citations: list[CitationRecord]
 ) -> None:
-    """Persist resolved citations, keeping any annotations already present."""
+    """Persist resolved citations, ignoring references already stored."""
     rows = [_citation_row(paper_id, citation) for citation in citations]
-    with sqlite3.connect(database_path) as db:
+    with connect(database_path) as db:
         db.executemany(_INSERT_CITATION_SQL, rows)
 
 
 def citations_for_paper(database_path: Path, paper_id: str) -> list[CitationRecord]:
     """Return citation records joined with resolved paper note paths."""
-    with sqlite3.connect(database_path) as db:
+    with connect(database_path) as db:
         db.row_factory = sqlite3.Row
         rows = db.execute(_CITATIONS_FOR_PAPER_SQL, (paper_id,)).fetchall()
     return [dict(row) for row in rows]
@@ -102,7 +120,7 @@ def citations_for_paper(database_path: Path, paper_id: str) -> list[CitationReco
 
 def document_for_digest(database_path: Path, digest: str) -> StoredDocument | None:
     """Return the stored document matching a PDF digest, if any."""
-    with sqlite3.connect(database_path) as db:
+    with connect(database_path) as db:
         row = db.execute(
             "SELECT id, paper_id, stored_path FROM documents WHERE sha256=?", (digest,)
         ).fetchone()
@@ -111,7 +129,7 @@ def document_for_digest(database_path: Path, digest: str) -> StoredDocument | No
 
 def update_document_path(database_path: Path, document_id: str, path: Path) -> None:
     """Record the new location of a document whose stored copy moved."""
-    with sqlite3.connect(database_path) as db:
+    with connect(database_path) as db:
         db.execute(
             "UPDATE documents SET stored_path=? WHERE id=?", (str(path), document_id)
         )
@@ -119,7 +137,7 @@ def update_document_path(database_path: Path, document_id: str, path: Path) -> N
 
 def extracted_text_for_document(database_path: Path, document_id: str) -> str:
     """Return the extracted text saved with a document, or an empty string."""
-    with sqlite3.connect(database_path) as db:
+    with connect(database_path) as db:
         row = db.execute(
             "SELECT extracted_text FROM documents WHERE id=?", (document_id,)
         ).fetchone()
@@ -128,7 +146,7 @@ def extracted_text_for_document(database_path: Path, document_id: str) -> str:
 
 def metadata_for_paper(database_path: Path, paper_id: str) -> PaperMetadata | None:
     """Return persisted bibliographic metadata for a paper."""
-    with sqlite3.connect(database_path) as db:
+    with connect(database_path) as db:
         row = db.execute(_PAPER_METADATA_SQL, (paper_id,)).fetchone()
     if row is None:
         return None
@@ -144,18 +162,11 @@ def metadata_for_paper(database_path: Path, paper_id: str) -> PaperMetadata | No
     }
 
 
-def paper_id_for_doi(database_path: Path, doi: str) -> str | None:
-    """Return the paper id already stored for a DOI."""
-    with sqlite3.connect(database_path) as db:
-        row = db.execute(
-            "SELECT id FROM papers WHERE lower(doi)=lower(?)", (doi,)
-        ).fetchone()
-    return row[0] if row else None
 
 
 def paper_for_doi(database_path: Path, doi: str) -> PaperLocation | None:
     """Return the paper id and note path stored for a DOI."""
-    with sqlite3.connect(database_path) as db:
+    with connect(database_path) as db:
         row = db.execute(
             "SELECT id, note_path FROM papers WHERE lower(doi)=lower(?)", (doi,)
         ).fetchone()
@@ -166,22 +177,19 @@ def save_ingestion(
     database_path: Path,
     paper_id: str,
     metadata: PaperMetadata,
-    digest: str,
-    filename: str,
-    stored_path: Path,
-    extracted_text: str,
+    document: IngestedDocument,
 ) -> None:
     """Upsert a paper, its document, and its ingestion job in one transaction."""
     extras = {
         key: value for key, value in metadata.items() if key not in _METADATA_FIELDS
     }
-    with sqlite3.connect(database_path) as db:
+    with connect(database_path) as db:
         db.execute(
             _SAVE_PAPER_SQL,
             (
                 paper_id,
                 metadata.get("doi"),
-                metadata.get("title") or Path(filename).stem,
+                metadata.get("title") or Path(document.filename).stem,
                 metadata.get("year"),
                 json.dumps(metadata.get("authors") or []),
                 metadata.get("venue"),
@@ -192,17 +200,24 @@ def save_ingestion(
         )
         db.execute(
             _INSERT_DOCUMENT_SQL,
-            (digest[:24], paper_id, digest, filename, str(stored_path), extracted_text),
+            (
+                document.digest[:24],
+                paper_id,
+                document.digest,
+                document.filename,
+                str(document.stored_path),
+                document.text,
+            ),
         )
         db.execute(
             "INSERT INTO ingestion_jobs(sha256, filename, status) VALUES(?,?,?)",
-            (digest, filename, "ingested"),
+            (document.digest, document.filename, "ingested"),
         )
 
 
 def set_paper_note_path(database_path: Path, paper_id: str, note_path: Path) -> None:
     """Record the rendered note path for a paper."""
-    with sqlite3.connect(database_path) as db:
+    with connect(database_path) as db:
         db.execute(
             "UPDATE papers SET note_path=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
             (str(note_path), paper_id),
@@ -213,7 +228,7 @@ def record_ingestion_failure(
     database_path: Path, digest: str, filename: str, error: str
 ) -> None:
     """Record a failed ingestion attempt for later inspection."""
-    with sqlite3.connect(database_path) as db:
+    with connect(database_path) as db:
         db.execute(
             "INSERT INTO ingestion_jobs(sha256, filename, status, error) VALUES(?,?,?,?)",
             (digest, filename, "failed", error),
@@ -222,6 +237,6 @@ def record_ingestion_failure(
 
 def unresolved_citations(database_path: Path) -> list[PendingCitation]:
     """Return citations that still need human review, with their source titles."""
-    with sqlite3.connect(database_path) as db:
+    with connect(database_path) as db:
         rows = db.execute(_UNRESOLVED_CITATIONS_SQL).fetchall()
     return [PendingCitation(*row) for row in rows]

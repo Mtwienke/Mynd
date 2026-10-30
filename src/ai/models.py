@@ -1,11 +1,25 @@
 from __future__ import annotations
 
-from .base import TextGenerator
-from .hosted import HostedGenerator
-from .local import OllamaGenerator
+from collections.abc import Callable
+
+from ai.base import TextGenerator
+from ai.hosted import HostedGenerator
+from ai.local import OllamaGenerator
+from ai.runtime import RuntimeControl
 
 
-def get_model_manager(use_local: bool = True, runtime_control=None, progress=None, verbose: bool = False) -> TextGenerator:
+def build_text_generator(
+    *,
+    use_local: bool = True,
+    runtime_control: RuntimeControl | None = None,
+    progress: Callable[[str], None] | None = None,
+    verbose: bool = False,
+) -> TextGenerator:
+    """Return the configured text-generation backend."""
     if use_local:
-        return OllamaGenerator(runtime_control=runtime_control, progress=progress, verbose=verbose)
+        return OllamaGenerator(
+            runtime_control=runtime_control,
+            progress=progress,
+            verbose=verbose,
+        )
     return HostedGenerator()

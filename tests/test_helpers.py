@@ -3,14 +3,15 @@ import sqlite3
 
 import pymupdf
 
-from ingestion.extract_text import extract_pdf
-from mynd.files import save_extracted_text, sha256_file, text_without_references
+from ingestion.extract_text import extract_text_and_doi
+from ingestion.text import save_extracted_text, text_without_references
+from mynd.files import sha256_file
 from mynd.review import write_review_queue
 from mynd.settings import load_settings
 from resolution.doi import normalize_doi
-from storage.database import initialize_database as init_db
-from storage.repositories import insert_resolved_citations, save_ingestion
-from vault.note_writer import write_paper_note as write_note
+from storage.database import initialize_database
+from storage.repositories import IngestedDocument, insert_resolved_citations, save_ingestion
+from vault.note_writer import PaperNote, write_paper_note
 
 
 def test_normalize_doi():
@@ -68,15 +69,17 @@ def test_load_settings_resolves_paths_relative_to_config(tmp_path):
 
 def test_write_review_queue_lists_unresolved_citations(tmp_path):
     settings = load_settings(_write_config(tmp_path))
-    init_db(settings.database_path)
+    initialize_database(settings.database_path)
     save_ingestion(
         settings.database_path,
         "doi-paper",
         {"title": "Source Paper", "authors": []},
-        "digest",
-        "source.pdf",
-        tmp_path / "source.pdf",
-        "text",
+        IngestedDocument(
+            digest="digest",
+            filename="source.pdf",
+            stored_path=tmp_path / "source.pdf",
+            text="text",
+        ),
     )
     insert_resolved_citations(
         settings.database_path,
@@ -112,7 +115,7 @@ def _write_config(tmp_path):
     return config
 
 
-def test_extract_pdf_finds_doi(tmp_path):
+def test_extract_text_and_doi_finds_doi(tmp_path):
     path = tmp_path / "sample.pdf"
     doc = pymupdf.open()
     page = doc.new_page()
@@ -120,15 +123,15 @@ def test_extract_pdf_finds_doi(tmp_path):
     doc.save(path)
     doc.close()
 
-    text, doi = extract_pdf(path)
+    text, doi = extract_text_and_doi(path)
     assert "Example paper" in text
     assert doi == "10.1234/test-paper"
 
 
 def test_init_db_is_idempotent(tmp_path):
     db_path = tmp_path / "data.sqlite3"
-    init_db(db_path)
-    init_db(db_path)
+    initialize_database(db_path)
+    initialize_database(db_path)
     with sqlite3.connect(db_path) as db:
         tables = {row[0] for row in db.execute(
             "SELECT name FROM sqlite_master WHERE type='table'"
@@ -136,7 +139,7 @@ def test_init_db_is_idempotent(tmp_path):
     assert {"papers", "documents", "citations", "ingestion_jobs"} <= tables
 
 
-def test_write_note_preserves_human_section(tmp_path):
+def test_write_paper_note_preserves_human_section(tmp_path):
     vault = tmp_path / "vault"
     source = tmp_path / "paper.pdf"
     source.write_bytes(b"placeholder")
@@ -145,14 +148,14 @@ def test_write_note_preserves_human_section(tmp_path):
         "authors": ["A Author"], "venue": "Journal", "url": "https://example.org",
         "abstract": "An abstract.",
     }
-    note = write_note(vault, "doi-abcdef123456", metadata, source)
+    note = write_paper_note(PaperNote(vault, "doi-abcdef123456", metadata, source))
     original = note.read_text(encoding="utf-8").replace(
         "_Add your own interpretation here. This section is preserved during note updates._",
         "My important interpretation."
     )
     note.write_text(original, encoding="utf-8")
 
-    write_note(vault, "doi-abcdef123456", metadata, source)
+    write_paper_note(PaperNote(vault, "doi-abcdef123456", metadata, source))
     updated = note.read_text(encoding="utf-8")
     assert "My important interpretation." in updated
     assert "## References" in updated

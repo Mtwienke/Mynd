@@ -6,8 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from ai.base import TextGenerator
-from resolution.citations import CitationRecord
-from resolution.metadata import PaperMetadata
+from mynd.contracts import CitationRecord, PaperMetadata
 
 logger = logging.getLogger(__name__)
 
@@ -100,13 +99,21 @@ Paper metadata:\n{context or 'Not provided'}\n\nBibliography entries:\n{entries}
             # network failures propagate to the ingestion failure boundary.
             logger.warning("Skipping reference annotations; model returned invalid JSON: %s", exc)
             return references
+        if not isinstance(annotations, list):
+            logger.warning("Skipping reference annotations; model returned JSON that is not a list")
+            return references
         for item in annotations:
+            if not isinstance(item, dict):
+                continue
             index = item.get("index")
             if isinstance(index, int) and 0 <= index < len(references):
                 ref = references[index]
                 ref["importance"] = item.get("importance")
                 ref["similarity"] = item.get("similarity")
-                ref["direction"] = ", ".join(item.get("directions", []))
+                directions = item.get("directions")
+                ref["direction"] = (
+                    ", ".join(directions) if isinstance(directions, list) else None
+                )
         return references
 
     def _chunks(self, text: str) -> list[str]:

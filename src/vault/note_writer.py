@@ -1,13 +1,19 @@
 from __future__ import annotations
 
-import hashlib
-import os
 import re
+from dataclasses import dataclass, field
 from pathlib import Path
 
-from resolution.citations import CitationRecord
+from mynd.contracts import CitationRecord, PaperMetadata
+from mynd.files import atomic_write_text
+from mynd.identity import (
+    WHITESPACE,
+    doi_work_id,
+    migrate_legacy_note,
+    note_filename,
+    title_work_id,
+)
 from resolution.doi import normalize_doi
-from resolution.metadata import PaperMetadata
 
 _SECTION_HEADINGS = ("Summary", "My notes", "Questions", "Reading log")
 _DOI_LINK = "[doi:{doi}](https://doi.org/{doi})"
@@ -21,22 +27,8 @@ _DEFAULT_READING_LOG = "_Add reading dates and observations here._"
 _CITATION_GROUP = r"(\d+(?:\s*[,;–-]\s*\d+)*)"
 
 
-def _slug(text: str) -> str:
-    text = re.sub(r"[\\/:*?\"<>|#^\[\]]", "", text)
-    text = re.sub(r"\s+", " ", text).strip(" .")
-    return text[:100] or "Untitled Paper"
-
-
 def _yaml_quote(value: str) -> str:
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", " ") + '"'
-
-
-def _write_atomic(path: Path, content: str) -> None:
-    """Write text through a temporary sibling, then rename it into place."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temp = path.with_name(path.name + ".tmp")
-    temp.write_text(content, encoding="utf-8")
-    os.replace(temp, path)
 
 
 def _doi_display(doi: str) -> str:
@@ -48,17 +40,38 @@ def _or_unknown(value: object, fallback: str = "Unknown") -> str:
     return str(value) if value else fallback
 
 
+def _sanitize_inline(value: object) -> str:
+    """Collapse untrusted text to a single line that cannot start a heading."""
+    return WHITESPACE.sub(" ", str(value)).strip().lstrip("#").strip()
+
+
+def _sanitize_block(value: str) -> str:
+    """Neutralize heading markers in untrusted multi-line text."""
+    return re.sub(r"(?m)^(\s{0,3})#", r"\1\\#", value)
+
+
+
+@dataclass(frozen=True)
+class PaperNote:
+    """Inputs for rendering and writing one paper note."""
+
+    vault: Path
+    paper_id: str
+    metadata: PaperMetadata
+    source_pdf: Path
+    citations: list[CitationRecord] = field(default_factory=list)
+    summary: str | None = None
+
+
 def write_reference_placeholder(vault: Path, citation: CitationRecord) -> Path:
     """Create a stable note for a cited work that has not been ingested."""
     doi = normalize_doi(citation.get("doi"))
-    raw = citation.get("raw_reference", "")
-    title = citation.get("title") or raw or "Unknown reference"
-    identity = doi.lower() if doi else title.casefold()
-    digest = hashlib.sha1(identity.encode("utf-8"), usedforsecurity=False).hexdigest()
-    paper_id = "doi-" + digest[:12] if doi else "paper-" + digest[:16]
+    raw = _sanitize_inline(citation.get("raw_reference", ""))
+    title = _sanitize_inline(citation.get("title") or raw or "Unknown reference")
+    paper_id = doi_work_id(doi) if doi else title_work_id(title)
     placeholders_dir = vault / "11 Citation Placeholders"
     placeholders_dir.mkdir(parents=True, exist_ok=True)
-    path = placeholders_dir / f"{_slug(title)} ({paper_id[-12:]}).md"
+    path = placeholders_dir / note_filename(title, paper_id)
     if path.exists():
         return path
     content = f'''---
@@ -76,25 +89,13 @@ This placeholder was created from a citation. Ingest the paper to replace it wit
 - **DOI:** {_doi_display(doi or "")}
 - **Citation as extracted:** {raw}
 '''
-    _write_atomic(path, content)
+    atomic_write_text(path, content)
     return path
-
-
-def _migrate_bracketed_note_path(path: Path) -> Path:
-    """Rename legacy `Title [id].md` notes to parser-safe `Title (id).md` names."""
-    match = re.match(r"^(.*) \[([0-9a-fA-F]{12,16})\](\.md)$", path.name)
-    if not match or not path.exists():
-        return path
-    replacement = path.with_name(f"{match.group(1)} ({match.group(2)}){match.group(3)}")
-    if replacement.exists():
-        return replacement
-    path.rename(replacement)
-    return replacement
 
 
 def _obsidian_link(vault: Path, target: str | Path) -> str:
     """Build a vault-relative Obsidian link to an existing note path."""
-    path = _migrate_bracketed_note_path(Path(target))
+    path = migrate_legacy_note(Path(target))
     try:
         link_path = path.resolve().relative_to(vault.resolve()).with_suffix("")
     except ValueError:
@@ -169,14 +170,14 @@ def _citation_lines(vault: Path, citations: list[CitationRecord]) -> str:
 
 
 def _paper_metadata_block(metadata: PaperMetadata, source_pdf: Path) -> str:
-    authors = metadata.get("authors") or []
+    authors = [_sanitize_inline(author) for author in metadata.get("authors") or []]
     fields = (
         ("Authors", _or_unknown(", ".join(authors))),
         ("Year", _or_unknown(metadata.get("year"))),
-        ("Venue", _or_unknown(metadata.get("venue"))),
+        ("Venue", _sanitize_inline(_or_unknown(metadata.get("venue")))),
         ("DOI", _doi_display(metadata.get("doi") or "")),
         ("Source PDF", f"`{source_pdf.as_posix()}`"),
-        ("Metadata URL", _or_unknown(metadata.get("url"), "Not available")),
+        ("Metadata URL", _sanitize_inline(_or_unknown(metadata.get("url"), "Not available"))),
     )
     return "\n".join(f"- **{label}:** {value}" for label, value in fields)
 
@@ -200,12 +201,7 @@ def _read_human_sections(path: Path) -> dict[str, str]:
 
 def _note_path(papers_dir: Path, title: str, paper_id: str) -> Path:
     """Return the current note path, migrating legacy bracketed filenames."""
-    slug = _slug(title)
-    path = papers_dir / f"{slug} ({paper_id[-12:]}).md"
-    legacy = papers_dir / f"{slug} [{paper_id[-12:]}].md"
-    if legacy.exists() and not path.exists():
-        legacy.rename(path)
-    return path
+    return migrate_legacy_note(papers_dir / note_filename(title, paper_id))
 
 
 def _render_paper_note(
@@ -219,7 +215,8 @@ def _render_paper_note(
     summary: str | None,
     human_sections: dict[str, str],
 ) -> str:
-    summary_content = summary or _SUMMARY_FALLBACK
+    summary_content = _sanitize_block(summary or _SUMMARY_FALLBACK)
+    abstract = _sanitize_block(metadata.get('abstract') or '_No abstract retrieved._')
     return f"""---
 type: paper
 work_id: {_yaml_quote(paper_id)}
@@ -238,7 +235,7 @@ status: inbox
 
 ## Abstract
 
-{metadata.get('abstract') or '_No abstract retrieved._'}
+{abstract}
 
 ## My notes
 
@@ -265,34 +262,22 @@ Reference labels are tentative reading aids inferred from this paper's text.
 """
 
 
-def write_paper_note(
-    vault: Path,
-    paper_id: str,
-    metadata: PaperMetadata,
-    source_pdf: Path,
-    citations: list[CitationRecord] | None = None,
-    summary: str | None = None,
-) -> Path:
+def write_paper_note(note: PaperNote) -> Path:
     """Render and atomically write a paper note, preserving human-authored sections."""
-    papers_dir = vault / "10 Papers"
+    papers_dir = note.vault / "10 Papers"
     papers_dir.mkdir(parents=True, exist_ok=True)
-    title = metadata.get("title") or source_pdf.stem
-    path = _note_path(papers_dir, title, paper_id)
+    title = _sanitize_inline(note.metadata.get("title") or note.source_pdf.stem)
+    path = _note_path(papers_dir, title, note.paper_id)
     human_sections = _read_human_sections(path)
     content = _render_paper_note(
-        vault=vault,
-        paper_id=paper_id,
+        vault=note.vault,
+        paper_id=note.paper_id,
         title=title,
-        metadata=metadata,
-        source_pdf=source_pdf,
-        citations=citations or [],
-        summary=summary or human_sections.get("Summary"),
+        metadata=note.metadata,
+        source_pdf=note.source_pdf,
+        citations=note.citations,
+        summary=note.summary or human_sections.get("Summary"),
         human_sections=human_sections,
     )
-    _write_atomic(path, content)
+    atomic_write_text(path, content)
     return path
-
-
-def write_note(path: Path, content: str) -> None:
-    """Atomically write arbitrary Markdown content to a path."""
-    _write_atomic(path, content)

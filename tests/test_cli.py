@@ -105,3 +105,23 @@ def test_review_queue_command_prints_path(tmp_path):
         result = runner.invoke(app, ["review-queue", "--config", str(config)])
     assert result.exit_code == 0
     assert str(expected) in result.output
+
+
+def test_settings_from_reports_malformed_config(tmp_path):
+    config = tmp_path / "bad.toml"
+    config.write_text("this is not toml", encoding="utf-8")
+
+    result = runner.invoke(app, ["doctor", "--config", str(config)])
+
+    assert result.exit_code != 0
+    assert "Invalid config" in result.output
+
+
+def test_settings_from_reports_missing_required_keys(tmp_path):
+    config = tmp_path / "partial.toml"
+    config.write_text('vault_path = "vault"\n', encoding="utf-8")
+
+    result = runner.invoke(app, ["doctor", "--config", str(config)])
+
+    assert result.exit_code != 0
+    assert "database_path" in result.output

@@ -1,0 +1,1 @@
+"""Obsidian vault note rendering."""

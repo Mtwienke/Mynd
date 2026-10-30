@@ -1,12 +1,27 @@
-# Wisdom Storage v0.1
+# Mynd v0.1
 
-A local-first Python prototype that ingests PDFs from an inbox, stores metadata in SQLite,
-and writes readable paper notes into an Obsidian vault.
+A local-first Python research library that ingests PDFs from an inbox, stores
+metadata in SQLite, and writes readable paper notes into an Obsidian vault.
+
+## Project layout
+
+The installable code lives under `src/` and is split by responsibility:
+
+| Package | Responsibility |
+| --- | --- |
+| `mynd` | CLI, ingestion coordinator, settings, shared contracts, file and identity primitives |
+| `ingestion` | PDF text and GROBID bibliography extraction |
+| `resolution` | DOI normalization, Crossref lookup, and reference resolution |
+| `storage` | SQLite schema and row-level persistence helpers |
+| `vault` | Obsidian note rendering and citation linking |
+| `ai` | Local Ollama backend, runtime controls, and summarization |
 
 ## Requirements
 
 - Python 3.11+
 - Internet access for Crossref metadata lookups
+- Ollama with a local text model (default `qwen3:8b`) for summaries; ingestion
+  continues without a summary when Ollama or the model is unavailable
 - Optional: a local GROBID service for bibliography extraction
 
 ## Install
@@ -20,7 +35,7 @@ source .venv/bin/activate
 # Windows PowerShell:
 # .venv\Scripts\Activate.ps1
 
-python -m pip install -e ".[dev]"
+python -m pip install -c constraints.txt -e ".[dev]"
 ```
 
 Edit `config.toml` and set `vault_path` to your actual Obsidian vault directory.
@@ -33,7 +48,7 @@ mynd doctor
 pytest
 ```
 
-Copy PDFs into `data/inbox/`, then run:
+Copy PDFs into the configured inbox (`./vault/00 Inbox` by default), then run:
 
 ```bash
 mynd ingest
@@ -82,4 +97,4 @@ Keep that process running, then ingest PDFs. If GROBID is unavailable, the PDF a
 
 ## Privacy
 
-PDFs, extracted text, and SQLite data are stored locally. Crossref receives DOI lookup requests, and a locally run GROBID service receives the PDF for bibliography extraction. With the default local model setting, extracted paper text (excluding a terminal bibliography) is sent to the configured Ollama model on your machine for summarization and reference annotation. If the hosted-model setting is selected, the current hosted backend is a placeholder and reports itself unavailable, so summarization is skipped.
+PDFs, extracted text, and SQLite data are stored locally. Crossref receives DOI lookup requests, and a locally run GROBID service receives the PDF for bibliography extraction. With the default local model setting, extracted paper text (excluding a terminal bibliography) is sent to the configured Ollama model on your machine for summarization and reference annotation. If the hosted-model setting is selected, the current hosted backend is a placeholder that reports itself unavailable and refuses to generate text, so summarization is skipped.

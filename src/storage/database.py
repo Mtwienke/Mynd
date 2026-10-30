@@ -2,13 +2,19 @@ import sqlite3
 from pathlib import Path
 
 
+def connect(path: Path) -> sqlite3.Connection:
+    """Open a connection that enforces the schema's declared foreign keys."""
+    connection = sqlite3.connect(path)
+    connection.execute("PRAGMA foreign_keys = ON")
+    return connection
+
+
 def initialize_database(path: Path) -> None:
     """Create the local research library schema if it does not exist yet."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(path) as db:
+    with connect(path) as db:
         db.executescript(
             """
-            PRAGMA foreign_keys = ON;
             CREATE TABLE IF NOT EXISTS papers (
                 id TEXT PRIMARY KEY,
                 doi TEXT UNIQUE,

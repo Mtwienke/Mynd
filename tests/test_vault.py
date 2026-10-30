@@ -1,19 +1,19 @@
 from pathlib import Path
 
+from mynd.files import atomic_write_text
+from mynd.identity import migrate_legacy_note, slugify
 from vault.note_writer import (
-    _migrate_bracketed_note_path,
-    _slug,
+    PaperNote,
     _yaml_quote,
     link_summary_citations,
-    write_note,
     write_paper_note,
     write_reference_placeholder,
 )
 
 
 def test_slug_strips_unsafe_characters():
-    assert _slug("A/B: C?") == "AB C"
-    assert _slug("   ") == "Untitled Paper"
+    assert slugify("A/B: C?") == "AB C"
+    assert slugify("   ") == "Untitled Paper"
 
 
 def test_yaml_quote_escapes_values():
@@ -21,9 +21,9 @@ def test_yaml_quote_escapes_values():
     assert _yaml_quote("line\nbreak") == '"line break"'
 
 
-def test_write_note_is_atomic(tmp_path):
+def test_atomic_write_text_creates_parents(tmp_path):
     target = tmp_path / "nested" / "note.md"
-    write_note(target, "hello")
+    atomic_write_text(target, "hello")
     assert target.read_text(encoding="utf-8") == "hello"
     assert not target.with_suffix(".md.tmp").exists()
 
@@ -41,7 +41,9 @@ def test_write_paper_note_creates_note_with_sections(tmp_path):
         "abstract": "An abstract.",
     }
     path = write_paper_note(
-        tmp_path / "vault", "paper-abcdef123456", metadata, pdf, summary="My summary"
+        PaperNote(
+            tmp_path / "vault", "paper-abcdef123456", metadata, pdf, summary="My summary"
+        )
     )
     content = path.read_text(encoding="utf-8")
     assert "# A Study" in content
@@ -55,7 +57,7 @@ def test_write_paper_note_preserves_human_sections(tmp_path):
     pdf.write_bytes(b"%PDF-1.4")
     metadata = {"title": "A Study", "authors": [], "doi": None, "year": None}
     vault = tmp_path / "vault"
-    path = write_paper_note(vault, "paper-abcdef123456", metadata, pdf, summary="First")
+    path = write_paper_note(PaperNote(vault, "paper-abcdef123456", metadata, pdf, summary="First"))
 
     content = path.read_text(encoding="utf-8")
     content = content.replace(
@@ -64,7 +66,7 @@ def test_write_paper_note_preserves_human_sections(tmp_path):
     )
     path.write_text(content, encoding="utf-8")
 
-    write_paper_note(vault, "paper-abcdef123456", metadata, pdf, summary="Second")
+    write_paper_note(PaperNote(vault, "paper-abcdef123456", metadata, pdf, summary="Second"))
     updated = path.read_text(encoding="utf-8")
     assert "My private notes" in updated
     assert "Second" in updated
@@ -82,7 +84,7 @@ def test_write_reference_placeholder_is_idempotent(tmp_path):
 def test_link_summary_citations_replaces_numbers(tmp_path):
     vault = tmp_path / "vault"
     note = vault / "10 Papers" / "Target (abc123).md"
-    write_note(note, "note")
+    atomic_write_text(note, "note")
     summary = "See [1] and [2, 3]."
     citations = [
         {"raw_reference": "one", "target_note": note},
@@ -98,10 +100,23 @@ def test_link_summary_citations_none_summary():
     assert link_summary_citations(None, [], Path("/tmp")) is None
 
 
-def test_migrate_bracketed_note_path_renames(tmp_path):
+def test_migrate_legacy_note_renames(tmp_path):
     legacy = tmp_path / "Title [abcdef123456].md"
     legacy.write_text("x", encoding="utf-8")
-    migrated = _migrate_bracketed_note_path(legacy)
+    migrated = migrate_legacy_note(legacy)
     assert migrated.name == "Title (abcdef123456).md"
     assert migrated.exists()
     assert not legacy.exists()
+
+
+def test_untrusted_titles_cannot_inject_note_sections(tmp_path):
+    pdf = tmp_path / "paper.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    metadata = {"title": "Innocent\n## Summary\nHijacked", "authors": []}
+
+    note = write_paper_note(PaperNote(tmp_path / "vault", "paper-abc123def456", metadata, pdf))
+
+    content = note.read_text(encoding="utf-8")
+    summary_headings = [line for line in content.splitlines() if line.startswith("## Summary")]
+    assert summary_headings == ["## Summary"]
+    assert "Hijacked" in content

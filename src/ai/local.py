@@ -25,7 +25,9 @@ MONITOR_INTERVAL_SECONDS = 5.0
 MONITOR_JOIN_SECONDS = 3.0
 FAN_COOLDOWN_SECONDS = 3
 STATUS_TIMEOUT_SECONDS = 2.0
-FREEZE = 1_000_000_000
+NANOSECONDS_PER_SECOND = 1_000_000_000
+BYTES_PER_GIGABYTE = 1_000_000_000
+THERMAL_CHECK_INTERVAL_SECONDS = 0.5
 FAN_LIMITS_MESSAGE = (
     "Fan speed is above 0 RPM; using extra-low inference limits "
     "(CPU-only request, 1 CPU thread, batch 32) and a 3-second cooldown"
@@ -105,7 +107,7 @@ class OllamaGenerator:
             if value is None:
                 continue
             if key.endswith("_duration"):
-                details.append(f"{key}={value / FREEZE:.2f}s")
+                details.append(f"{key}={value / NANOSECONDS_PER_SECOND:.2f}s")
             else:
                 details.append(f"{key}={value}")
         rate = _tokens_per_second(stats)
@@ -150,7 +152,7 @@ class OllamaGenerator:
             if error != self._last_runtime_error:
                 message = f"Ollama runtime allocation unavailable: {error}"
             self._last_runtime_error = error
-            return None, message
+            return ("unavailable", error), message
 
         self._last_runtime_error = None
         target = _loaded_model(models, self.model)
@@ -173,7 +175,9 @@ class OllamaGenerator:
             response = self.client.get("/api/tags", timeout=STATUS_TIMEOUT_SECONDS)
             response.raise_for_status()
             models = response.json().get("models", [])
-        except (httpx.HTTPError, ValueError):
+        except (httpx.HTTPError, ValueError) as exc:
+            self._last_runtime_error = f"ollama /api/tags unavailable: {exc}"
+            logger.warning("Cannot check Ollama model availability: %s", exc)
             return False
         return _loaded_model(models, self.model) is not None
 
@@ -200,21 +204,16 @@ class OllamaGenerator:
                 check=False,
             )
             for line in (result.stdout or "").splitlines():
-                print(f"  [Ollama] {line}", file=sys.stderr, flush=True)
+                self.progress(f"Ollama pull: {line}")
             if result.returncode != 0:
                 detail = (result.stderr or "").strip() or f"exit code {result.returncode}"
-                raise subprocess.CalledProcessError(
-                    result.returncode, ["ollama", "pull", self.model], output=detail
-                )
-
+                logger.error("Failed to pull Ollama model %s: %s", self.model, detail)
+                self.progress(f"Failed to download model {self.model}: {detail}")
+                return False
             return self.is_running()
-        except (
-            subprocess.CalledProcessError,
-            subprocess.TimeoutExpired,
-            FileNotFoundError,
-        ) as e:
-            logger.error("Failed to pull Ollama model %s: %s", self.model, e)
-            print(f"[ai] Failed to download model {self.model}: {e}", file=sys.stderr, flush=True)
+        except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
+            logger.error("Failed to pull Ollama model %s: %s", self.model, exc)
+            self.progress(f"Failed to download model {self.model}: {exc}")
             return False
 
     def generate(self, prompt: str) -> str:
@@ -242,8 +241,6 @@ class OllamaGenerator:
         if runtime is None:
             return _Attempt(mode=None, fan_active=False)
         runtime.wait_until_safe(self.progress)
-        while runtime.thermal_state() in runtime.HOT_STATES:
-            runtime.wait_until_safe(self.progress)
         mode = runtime.mode()
         snapshot, _error = runtime.hardware_snapshot()
         fan_active = mode == "silent" and runtime.fan_active(snapshot)
@@ -265,18 +262,17 @@ class OllamaGenerator:
 
         monitor = self._start_runtime_monitor() if runtime and self.verbose else None
         try:
-            pieces, final_item, interrupted = self._consume_stream(payload, attempt)
+            pieces, final_item, interrupted = self._consume_stream(payload)
         finally:
             if monitor is not None:
                 self._stop_monitor(monitor)
         return pieces, final_item, interrupted
 
-    def _consume_stream(
-        self, payload: dict, attempt: _Attempt
-    ) -> tuple[list[str], dict, bool]:
+    def _consume_stream(self, payload: dict) -> tuple[list[str], dict, bool]:
         """Read the streaming response, stopping early when thermals degrade."""
         pieces: list[str] = []
         final_item: dict = {}
+        next_thermal_check = 0.0
         with self.client.stream("POST", "/api/generate", json=payload) as response:
             response.raise_for_status()
             for line in response.iter_lines():
@@ -290,16 +286,17 @@ class OllamaGenerator:
                 if item.get("done"):
                     final_item = item
                     break
-                if self._thermal_interrupt(attempt.mode):
-                    return pieces, final_item, True
+                now = time.monotonic()
+                if now >= next_thermal_check:
+                    next_thermal_check = now + THERMAL_CHECK_INTERVAL_SECONDS
+                    if self._thermal_interrupt():
+                        return pieces, final_item, True
         return pieces, final_item, False
 
-    def _thermal_interrupt(self, mode: str | None) -> bool:
+    def _thermal_interrupt(self) -> bool:
+        """Return True when the runtime reports a thermal state that must pause."""
         runtime = self.runtime_control
-        if runtime is None:
-            return False
-        thermal = runtime.thermal_state()
-        return thermal in runtime.HOT_STATES or (thermal == "fair" and mode != "silent")
+        return runtime is not None and runtime.thermal_state() in runtime.HOT_STATES
 
     def close(self) -> None:
         """Close the underlying HTTP client."""
@@ -338,7 +335,7 @@ def _allocation_message(target: dict, model: str) -> str:
 
 def _vram_placement(size: float, size_vram: float) -> str:
     placement = (
-        f"size_vram={size_vram / FREEZE:.2f}GB / size={size / FREEZE:.2f}GB"
+        f"size_vram={size_vram / BYTES_PER_GIGABYTE:.2f}GB / size={size / BYTES_PER_GIGABYTE:.2f}GB"
     )
     if size <= 0:
         return placement
@@ -351,4 +348,4 @@ def _tokens_per_second(stats: dict) -> float | None:
         return None
     if duration <= 0:
         return None
-    return count / (duration / FREEZE)
+    return count / (duration / NANOSECONDS_PER_SECOND)

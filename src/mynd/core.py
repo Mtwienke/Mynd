@@ -1,54 +1,48 @@
 from __future__ import annotations
 
-import hashlib
 import shutil
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 from defusedxml import ElementTree as ET
 
-from ai.models import get_model_manager
+from ai.models import build_text_generator
 from ai.runtime import MacThermalMonitor, RuntimeControl
 from ai.summarize import SummaryWriter
 from ingestion.extract_references import extract_grobid_references
-from ingestion.extract_text import extract_pdf
-from mynd.files import save_extracted_text, sha256_file, text_without_references
-from mynd.settings import Settings
-from resolution.citations import CitationRecord, resolve_extracted_references
-from resolution.crossref import CrossrefClient, metadata_from_crossref
-from resolution.metadata import PaperMetadata
-from storage.database import initialize_database
-from storage.repositories import (
-    StoredDocument,
-    citations_for_paper,
-    document_for_digest,
-    extracted_text_for_document,
-    insert_resolved_citations,
-    metadata_for_paper,
-    paper_for_doi,
-    paper_id_for_doi,
-    record_ingestion_failure,
-    save_ingestion,
-    set_paper_note_path,
-    update_document_path,
+from ingestion.extract_text import extract_text_and_doi
+from ingestion.text import save_extracted_text, text_without_references
+from mynd.contracts import (
+    CitationRecord,
+    IngestionFailure,
+    IngestionResult,
+    IngestionSuccess,
+    PaperMetadata,
 )
+from mynd.files import sha256_file
+from mynd.identity import doi_work_id, file_work_id
+from mynd.settings import Settings
+from resolution.citations import resolve_extracted_references
+from resolution.crossref import CrossrefClient, metadata_from_crossref
+from storage import repositories
+from storage.database import initialize_database
 from vault.note_writer import (
+    PaperNote,
     link_summary_citations,
     write_paper_note,
     write_reference_placeholder,
 )
 
+_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 
-def _paper_id(doi: str | None, digest: str) -> str:
-    if doi:
-        return "doi-" + hashlib.sha1(
-            doi.lower().encode(), usedforsecurity=False
-        ).hexdigest()[:12]
-    return "paper-" + digest[:16]
+
+def _is_loopback_url(url: str) -> bool:
+    """Return True when a service URL points at this machine."""
+    return (urlparse(url).hostname or "") in _LOOPBACK_HOSTS
 
 
 @dataclass(frozen=True)
@@ -70,31 +64,30 @@ def ingest_pdf(
     crossref: CrossrefClient | None = None,
     progress: Callable[[str], None] | None = None,
     summarizer: SummaryWriter | None = None,
-) -> dict[str, Any]:
-    """Ingest or refresh one PDF, then run a shared summary and note finalization."""
-    report = progress or (lambda _message: None)
+) -> IngestionSuccess:
+    """Ingest or refresh one PDF; the caller must have initialized the schema."""
+    progress = progress or (lambda _message: None)
     if not pdf_path.exists() or pdf_path.suffix.lower() != ".pdf":
         raise ValueError(f"Not a PDF file: {pdf_path}")
 
-    initialize_database(settings.database_path)
     digest = sha256_file(pdf_path)
     settings.pdf_store_path.mkdir(parents=True, exist_ok=True)
     stored_pdf = settings.pdf_store_path / f"{digest[:16]}{pdf_path.suffix.lower()}"
 
-    existing = document_for_digest(settings.database_path, digest)
+    existing = repositories.document_for_digest(settings.database_path, digest)
     if existing:
-        prepared = _prepare_refresh(pdf_path, settings, existing, stored_pdf, report)
+        prepared = _prepare_refresh(pdf_path, settings, existing, stored_pdf, progress)
     else:
-        prepared = _prepare_new(pdf_path, settings, crossref, digest, stored_pdf, report)
-    return _finalize_ingestion(settings, crossref, summarizer, report, prepared)
+        prepared = _prepare_new(pdf_path, settings, crossref, digest, stored_pdf, progress)
+    return _finalize_ingestion(settings, crossref, summarizer, progress, prepared)
 
 
 def _prepare_refresh(
     pdf_path: Path,
     settings: Settings,
-    existing: StoredDocument,
+    existing: repositories.StoredDocument,
     stored_pdf: Path,
-    report: Callable[[str], None],
+    progress: Callable[[str], None],
 ) -> _PreparedDocument:
     """Reuse stored text and metadata for an already-ingested document."""
     document_id, paper_id, stored_path = existing
@@ -102,14 +95,14 @@ def _prepare_refresh(
     if not source_pdf.is_file():
         shutil.copy2(pdf_path, stored_pdf)
         source_pdf = stored_pdf
-        update_document_path(settings.database_path, document_id, source_pdf)
+        repositories.update_document_path(settings.database_path, document_id, source_pdf)
 
-    text = extracted_text_for_document(settings.database_path, document_id)
-    metadata = metadata_for_paper(settings.database_path, paper_id) or {
+    text = repositories.extracted_text_for_document(settings.database_path, document_id)
+    metadata = repositories.metadata_for_paper(settings.database_path, paper_id) or {
         "title": pdf_path.stem,
         "authors": [],
     }
-    report(f"Already ingested: {pdf_path.name}; refreshing note and references")
+    progress(f"Already ingested: {pdf_path.name}; refreshing note and references")
     return _PreparedDocument(
         paper_id=paper_id,
         metadata=metadata,
@@ -126,16 +119,16 @@ def _prepare_new(
     crossref: CrossrefClient | None,
     digest: str,
     stored_pdf: Path,
-    report: Callable[[str], None],
+    progress: Callable[[str], None],
 ) -> _PreparedDocument:
     """Extract, enrich, and persist a PDF seen for the first time."""
     if not stored_pdf.exists():
-        report("Copying PDF into the library")
+        progress("Copying PDF into the library")
         shutil.copy2(pdf_path, stored_pdf)
     source_pdf = stored_pdf
 
-    report("Extracting text and DOI from PDF")
-    text, doi = extract_pdf(source_pdf)
+    progress("Extracting text and DOI from PDF")
+    text, doi = extract_text_and_doi(source_pdf)
     metadata: PaperMetadata = {
         "doi": doi,
         "title": pdf_path.stem,
@@ -146,13 +139,23 @@ def _prepare_new(
         "abstract": None,
         "type": None,
     }
-    metadata_error = _enrich_metadata(metadata, doi, crossref, report)
+    metadata_error = _enrich_metadata(metadata, doi, crossref, progress)
 
-    paper_id = _paper_id(metadata.get("doi"), digest)
+    paper_id = doi_work_id(metadata.get("doi")) or file_work_id(digest)
     if metadata.get("doi"):
-        paper_id = paper_id_for_doi(settings.database_path, metadata["doi"]) or paper_id
-    save_ingestion(
-        settings.database_path, paper_id, metadata, digest, pdf_path.name, source_pdf, text
+        existing = repositories.paper_for_doi(settings.database_path, metadata["doi"])
+        if existing is not None:
+            paper_id = existing.id
+    repositories.save_ingestion(
+        settings.database_path,
+        paper_id,
+        metadata,
+        repositories.IngestedDocument(
+            digest=digest,
+            filename=pdf_path.name,
+            stored_path=source_pdf,
+            text=text,
+        ),
     )
     return _PreparedDocument(
         paper_id=paper_id,
@@ -169,13 +172,13 @@ def _enrich_metadata(
     metadata: PaperMetadata,
     doi: str | None,
     crossref: CrossrefClient | None,
-    report: Callable[[str], None],
+    progress: Callable[[str], None],
 ) -> str | None:
     """Fill metadata from Crossref, returning an error message on lookup failure."""
     if not (crossref and doi):
         return None
     try:
-        report(f"Looking up DOI metadata: {doi}")
+        progress(f"Looking up DOI metadata: {doi}")
         item = crossref.by_doi(doi)
         if item:
             metadata.update(
@@ -191,27 +194,27 @@ def _finalize_ingestion(
     settings: Settings,
     crossref: CrossrefClient | None,
     summarizer: SummaryWriter | None,
-    report: Callable[[str], None],
+    progress: Callable[[str], None],
     prepared: _PreparedDocument,
-) -> dict[str, Any]:
+) -> IngestionSuccess:
     """Persist extracted text, resolve references, summarize, and write the note."""
     extracted_text_path = save_extracted_text(settings.data_path, prepared.source_pdf, prepared.text)
-    report(f"Saved full extracted text: {extracted_text_path}")
+    progress(f"Saved full extracted text: {extracted_text_path}")
 
     citations, citation_errors, references_error = _resolve_references(
-        settings, crossref, prepared, report
+        settings, crossref, prepared, progress
     )
 
     summary = None
     if summarizer and prepared.text:
         summary_text = text_without_references(prepared.text)
-        report(
+        progress(
             f"Summarizing paper text ({len(summary_text):,} of "
             f"{len(prepared.text):,} characters; terminal references excluded)"
         )
-        summary = summarizer.summarize(summary_text, prepared.metadata, progress=report)
+        summary = summarizer.summarize(summary_text, prepared.metadata, progress=progress)
         citations = summarizer.annotate_references(summary_text, citations, prepared.metadata)
-        report("Summary generated")
+        progress("Summary generated")
 
     for citation in citations:
         if not citation.get("target_note"):
@@ -220,18 +223,20 @@ def _finalize_ingestion(
             )
     summary = link_summary_citations(summary, citations, settings.vault_path)
 
-    report("Writing Obsidian note")
+    progress("Writing Obsidian note")
     note = write_paper_note(
-        settings.vault_path,
-        prepared.paper_id,
-        prepared.metadata,
-        prepared.source_pdf,
-        citations,
-        summary,
+        PaperNote(
+            vault=settings.vault_path,
+            paper_id=prepared.paper_id,
+            metadata=prepared.metadata,
+            source_pdf=prepared.source_pdf,
+            citations=citations,
+            summary=summary,
+        )
     )
-    set_paper_note_path(settings.database_path, prepared.paper_id, note)
+    repositories.set_paper_note_path(settings.database_path, prepared.paper_id, note)
 
-    result = {
+    result: IngestionSuccess = {
         "status": prepared.status,
         "paper_id": prepared.paper_id,
         "doi": prepared.metadata.get("doi"),
@@ -253,28 +258,40 @@ def _resolve_references(
     settings: Settings,
     crossref: CrossrefClient | None,
     prepared: _PreparedDocument,
-    report: Callable[[str], None],
+    progress: Callable[[str], None],
 ) -> tuple[list[CitationRecord], list[str], str | None]:
     """Resolve bibliography entries, falling back to stored citations on refresh."""
     stored = (
-        citations_for_paper(settings.database_path, prepared.paper_id)
+        repositories.citations_for_paper(settings.database_path, prepared.paper_id)
         if prepared.is_refresh
         else []
     )
     if not settings.use_grobid:
         return stored, [], None
+    if not settings.allow_remote_services and not _is_loopback_url(settings.grobid_url):
+        return stored, [], (
+            "Refusing to send PDFs to a non-local GROBID service: "
+            f"{settings.grobid_url}. Set allow_remote_services = true to opt in."
+        )
     try:
-        report("Extracting bibliography with GROBID")
+        progress("Extracting bibliography with GROBID")
         references = extract_grobid_references(prepared.source_pdf, settings.grobid_url)
         citations, citation_errors = resolve_extracted_references(
             references,
-            lambda doi: paper_for_doi(settings.database_path, doi),
+            lambda doi: _paper_location(settings, doi),
             crossref,
         )
-        insert_resolved_citations(settings.database_path, prepared.paper_id, citations)
+        repositories.insert_resolved_citations(
+            settings.database_path, prepared.paper_id, citations
+        )
         return citations, citation_errors, None
     except (httpx.HTTPError, ET.ParseError, OSError) as exc:
         return stored, [], _reference_error_detail(exc)
+
+
+def _paper_location(settings: Settings, doi: str) -> tuple[str, str | None] | None:
+    found = repositories.paper_for_doi(settings.database_path, doi)
+    return (found.id, found.note_path) if found else None
 
 
 def _reference_error_detail(exc: Exception) -> str:
@@ -287,38 +304,38 @@ def _reference_error_detail(exc: Exception) -> str:
     return f"GROBID reference extraction failed: {exc}"
 
 
-def _stderr_report(message: str) -> None:
+def _stderr_progress(message: str) -> None:
     print(f"[ingest] {message}", file=sys.stderr, flush=True)
 
 
 def _prepare_runtime(
-    settings: Settings, report: Callable[[str], None], verbose: bool
+    settings: Settings, progress: Callable[[str], None], verbose: bool
 ) -> tuple[RuntimeControl, SummaryWriter | None]:
     """Start runtime control and resolve the summarizer for this batch."""
-    runtime_control = RuntimeControl(settings.data_path / ".mynd-mode")
-    report(f"Inference mode: {runtime_control.mode()}")
+    runtime_control = RuntimeControl(settings.mode_file)
+    progress(f"Inference mode: {runtime_control.mode()}")
     if settings.use_local_llm and not MacThermalMonitor.supported():
-        report(
+        progress(
             f"Automatic thermal response is not implemented for {sys.platform}; "
             "mode limits still work"
         )
     if settings.use_local_llm and verbose:
-        runtime_control.report_thermal_state("ingestion start", report)
+        runtime_control.report_thermal_state("ingestion start", progress)
 
-    manager = get_model_manager(
+    generator = build_text_generator(
         use_local=settings.use_local_llm,
         runtime_control=runtime_control,
-        progress=report,
+        progress=progress,
         verbose=verbose,
     )
-    report(f"Checking summarization model availability ({manager.model})")
-    if not manager.ensure_model():
-        report(
-            f"Model {manager.model} is unavailable; continuing ingestion without summarization"
+    progress(f"Checking summarization model availability ({generator.model})")
+    if not generator.ensure_model():
+        progress(
+            f"Model {generator.model} is unavailable; continuing ingestion without summarization"
         )
         return runtime_control, None
-    report(f"Summarization model ready: {manager.model}")
-    return runtime_control, SummaryWriter(manager)
+    progress(f"Summarization model ready: {generator.model}")
+    return runtime_control, SummaryWriter(generator)
 
 
 def _ingest_batch(
@@ -326,31 +343,45 @@ def _ingest_batch(
     settings: Settings,
     crossref: CrossrefClient | None,
     summarizer: SummaryWriter | None,
-    report: Callable[[str], None],
+    progress: Callable[[str], None],
     runtime_control: RuntimeControl,
     verbose: bool,
-) -> list[dict[str, Any]]:
+) -> list[IngestionResult]:
     """Ingest each PDF, isolating failures so one document cannot abort the batch."""
-    results: list[dict[str, Any]] = []
+    results: list[IngestionResult] = []
     for index, pdf in enumerate(pdfs, start=1):
         progress_label = f"PDF {index}/{len(pdfs)}"
-        report(f"{progress_label}: {pdf.name}")
+        progress(f"{progress_label}: {pdf.name}")
         try:
-            result = ingest_pdf(
-                pdf, settings, crossref, progress=report, summarizer=summarizer
+            result: IngestionResult = ingest_pdf(
+                pdf, settings, crossref, progress=progress, summarizer=summarizer
             )
-            report(f"Finished {progress_label}: {pdf.name} ({result['status']})")
+            progress(f"Finished {progress_label}: {pdf.name} ({result['status']})")
         except Exception as exc:  # noqa: BLE001 - isolate failures per document
-            record_ingestion_failure(
-                settings.database_path, sha256_file(pdf), pdf.name, str(exc)
-            )
-            result = {"status": "failed", "filename": pdf.name, "error": str(exc)}
-            report(f"Failed {progress_label}: {pdf.name}: {exc}")
+            failure: IngestionFailure = {
+                "status": "failed",
+                "filename": pdf.name,
+                "error": str(exc),
+            }
+            _record_failure(settings, pdf, exc)
+            result = failure
+            progress(f"Failed {progress_label}: {pdf.name}: {exc}")
             progress_label += " failure"
         results.append(result)
         if settings.use_local_llm and verbose:
-            runtime_control.report_thermal_state(progress_label, report)
+            runtime_control.report_thermal_state(progress_label, progress)
     return results
+
+
+def _record_failure(settings: Settings, pdf: Path, exc: Exception) -> None:
+    """Best-effort failure logging that cannot mask the original exception."""
+    try:
+        digest = sha256_file(pdf)
+    except OSError:
+        digest = ""
+    repositories.record_ingestion_failure(
+        settings.database_path, digest, pdf.name, str(exc)
+    )
 
 
 def ingest_inbox(
@@ -358,20 +389,23 @@ def ingest_inbox(
     crossref: CrossrefClient | None = None,
     *,
     verbose: bool = False,
-) -> list[dict[str, Any]]:
+) -> list[IngestionResult]:
     """Process every PDF in the configured inbox."""
-    report = _stderr_report
+    notify = _stderr_progress
     settings.inbox_path.mkdir(parents=True, exist_ok=True)
     settings.vault_path.mkdir(parents=True, exist_ok=True)
     initialize_database(settings.database_path)
 
     pdfs = sorted(settings.inbox_path.glob("*.pdf"))
-    report(f"Found {len(pdfs)} PDF{'s' if len(pdfs) != 1 else ''} in {settings.inbox_path}")
+    notify(f"Found {len(pdfs)} PDF{'s' if len(pdfs) != 1 else ''} in {settings.inbox_path}")
     if not pdfs:
         return []
 
-    runtime_control, summarizer = _prepare_runtime(settings, report, verbose)
-    return _ingest_batch(
-        pdfs, settings, crossref, summarizer, report, runtime_control, verbose
-    )
-
+    runtime_control, summarizer = _prepare_runtime(settings, notify, verbose)
+    try:
+        return _ingest_batch(
+            pdfs, settings, crossref, summarizer, notify, runtime_control, verbose
+        )
+    finally:
+        if summarizer is not None:
+            summarizer.generator.close()

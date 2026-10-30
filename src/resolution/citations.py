@@ -1,27 +1,9 @@
 from collections.abc import Callable
-from pathlib import Path
-from typing import Required, TypedDict
 
 import httpx
 
+from mynd.contracts import CitationRecord, ReferenceRecord
 from resolution.crossref import CrossrefClient
-from resolution.metadata import ReferenceRecord
-
-
-class CitationRecord(TypedDict, total=False):
-    """Dictionary contract shared by extraction, storage, summaries, and notes."""
-
-    raw_reference: Required[str]
-    doi: str | None
-    target_id: str | None
-    target_note: str | Path | None
-    placeholder_note: str | Path | None
-    status: str
-    confidence: float
-    evidence: str | None
-    importance: str | None
-    direction: str | None
-    similarity: str | None
 
 
 def resolve_extracted_references(
@@ -47,11 +29,12 @@ def resolve_extracted_references(
                 try:
                     if crossref.by_doi(doi):
                         status, confidence = "external", 0.95
-                except httpx.HTTPError as exc:
+                except (httpx.HTTPError, ValueError, KeyError) as exc:
                     errors.append(f"{doi}: {exc}")
         citations.append({
             "raw_reference": reference["raw_reference"],
             "doi": doi,
+            "title": reference.get("title"),
             "target_id": target_id,
             "target_note": target_note,
             "status": status,

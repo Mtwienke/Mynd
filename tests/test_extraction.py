@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, patch
 import pymupdf
 
 from ingestion.extract_references import extract_grobid_references
-from ingestion.extract_text import extract_pdf
+from ingestion.extract_text import extract_text_and_doi
 
 
 def _write_pdf(path, text_lines):
@@ -17,18 +17,18 @@ def _write_pdf(path, text_lines):
     doc.close()
 
 
-def test_extract_pdf_returns_text_and_doi(tmp_path):
+def test_extract_text_and_doi_returns_text_and_doi(tmp_path):
     pdf = tmp_path / "paper.pdf"
     _write_pdf(pdf, ["A title", "DOI: 10.1234/extracted"])
-    text, doi = extract_pdf(pdf)
+    text, doi = extract_text_and_doi(pdf)
     assert "A title" in text
     assert doi == "10.1234/extracted"
 
 
-def test_extract_pdf_without_doi(tmp_path):
+def test_extract_text_and_doi_without_doi(tmp_path):
     pdf = tmp_path / "paper.pdf"
     _write_pdf(pdf, ["No identifier here"])
-    text, doi = extract_pdf(pdf)
+    text, doi = extract_text_and_doi(pdf)
     assert "No identifier" in text
     assert doi is None
 

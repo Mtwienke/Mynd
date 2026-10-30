@@ -106,3 +106,14 @@ def test_annotate_references_empty_returns_unchanged():
     writer = SummaryWriter(generator)
     assert writer.annotate_references("text", []) == []
     assert generator.prompts == []
+
+
+def test_annotate_references_ignores_non_list_model_output():
+    from unittest.mock import MagicMock
+
+    generator = MagicMock()
+    generator.generate.return_value = '{"not": "a list"}'
+    writer = SummaryWriter(generator)
+    references = [{"raw_reference": "One"}]
+
+    assert writer.annotate_references("paper text", references) == references

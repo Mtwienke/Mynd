@@ -2,12 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import os
-import re
 from pathlib import Path
 
-_REFERENCES_HEADING = re.compile(
-    r"(?im)^[ \t]*(?:REFERENCES(?:[ \t]+AND[ \t]+NOTES)?|BIBLIOGRAPHY)[ \t]*$"
-)
 _HASH_CHUNK_SIZE = 1 << 20
 
 
@@ -26,18 +22,3 @@ def atomic_write_text(path: Path, content: str) -> None:
     temp = path.with_name(path.name + ".tmp")
     temp.write_text(content, encoding="utf-8")
     os.replace(temp, path)
-
-
-def save_extracted_text(data_path: Path, stored_pdf: Path, text: str) -> Path:
-    """Persist full PDF text for inspection and troubleshooting."""
-    output = data_path / "extracted_text" / f"{stored_pdf.stem}.txt"
-    atomic_write_text(output, text)
-    return output
-
-
-def text_without_references(text: str) -> str:
-    """Exclude a terminal bibliography from the text sent to the summarizer."""
-    for match in _REFERENCES_HEADING.finditer(text):
-        if match.start() >= len(text) // 2:
-            return text[: match.start()].rstrip()
-    return text

@@ -2,19 +2,25 @@ from __future__ import annotations
 
 
 class HostedGenerator:
-    """Placeholder for hosted model management."""
+    """Unavailable placeholder for a future hosted model backend."""
 
-    def __init__(self, model: str = "gpt-4"):
+    def __init__(self, model: str = "gpt-4") -> None:
         self.model = model
 
     def is_running(self) -> bool:
-        """Placeholder check for hosted model availability."""
+        """Hosted generation is not implemented, so it is never available."""
         return False
 
     def ensure_model(self) -> bool:
-        """Placeholder for ensuring hosted model availability."""
-        return self.is_running()
+        """Hosted generation is not implemented, so it cannot be prepared."""
+        return False
 
     def generate(self, prompt: str) -> str:
-        """Placeholder for hosted text generation."""
-        return f"Hosted generation result from {self.model}"
+        """Refuse to fabricate output for an unimplemented backend."""
+        raise NotImplementedError(
+            "Hosted text generation is not implemented; "
+            "configure a local Ollama model instead."
+        )
+
+    def close(self) -> None:
+        """No network resources are held by the placeholder backend."""
