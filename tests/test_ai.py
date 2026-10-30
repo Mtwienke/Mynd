@@ -53,23 +53,25 @@ def test_ollama_generator_ensure_model_already_running():
         assert gen.ensure_model() is True
 
 
-def test_ollama_generator_ensure_model_pulls_via_popen():
+def test_ollama_generator_ensure_model_pulls_with_timeout():
     gen = OllamaGenerator(model="mistral")
-    process = MagicMock()
-    process.stdout = ["pulling\n", "done\n"]
-    process.returncode = 0
+    completed = MagicMock()
+    completed.stdout = "pulling\ndone\n"
+    completed.stderr = ""
+    completed.returncode = 0
     with patch.object(
         OllamaGenerator, "is_running", side_effect=[False, True]
-    ), patch("ai.local.subprocess.Popen", return_value=process) as popen:
+    ), patch("ai.local.subprocess.run", return_value=completed) as run:
         assert gen.ensure_model() is True
-    popen.assert_called_once()
-    assert popen.call_args.args[0] == ["ollama", "pull", "mistral"]
+    run.assert_called_once()
+    assert run.call_args.args[0] == ["ollama", "pull", "mistral"]
+    assert run.call_args.kwargs["timeout"] == 900
 
 
 def test_ollama_generator_ensure_model_reports_failure():
     gen = OllamaGenerator(model="mistral")
     with patch.object(OllamaGenerator, "is_running", return_value=False), patch(
-        "ai.local.subprocess.Popen", side_effect=FileNotFoundError("no ollama")
+        "ai.local.subprocess.run", side_effect=FileNotFoundError("no ollama")
     ):
         assert gen.ensure_model() is False
 

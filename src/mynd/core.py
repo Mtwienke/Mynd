@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 import hashlib
-import re
 import shutil
 import sys
 from collections.abc import Callable
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +15,8 @@ from ai.runtime import MacThermalMonitor, RuntimeControl
 from ai.summarize import SummaryWriter
 from ingestion.extract_references import extract_grobid_references
 from ingestion.extract_text import extract_pdf
+from mynd.files import save_extracted_text, sha256_file, text_without_references
+from mynd.settings import Settings
 from resolution.citations import resolve_extracted_references
 from resolution.crossref import CrossrefClient, metadata_from_crossref
 from resolution.metadata import PaperMetadata
@@ -27,84 +27,18 @@ from storage.repositories import (
     extracted_text_for_document,
     insert_resolved_citations,
     metadata_for_paper,
+    paper_for_doi,
     paper_id_for_doi,
     record_ingestion_failure,
     save_ingestion,
     set_paper_note_path,
-    unresolved_citations,
     update_document_path,
 )
 from vault.note_writer import (
-    link_summary_citations as _link_summary_citations,
-)
-from vault.note_writer import (
+    link_summary_citations,
     write_paper_note,
     write_reference_placeholder,
 )
-
-
-@dataclass(frozen=True)
-class Settings:
-    vault_path: Path
-    data_path: Path
-    inbox_path: Path
-    pdf_store_path: Path
-    database_path: Path
-    grobid_url: str = "http://localhost:8070"
-    use_grobid: bool = True
-    crossref_email: str = "you@example.com"
-    use_local_llm: bool = True  # New setting for LLM preference
-
-
-def load_settings(path: Path) -> Settings:
-    import tomllib
-
-    raw = tomllib.loads(path.read_text(encoding="utf-8"))
-    base = path.parent
-
-    def resolve(value: str) -> Path:
-        candidate = Path(value).expanduser()
-        return candidate if candidate.is_absolute() else (base / candidate).resolve()
-
-    return Settings(
-        vault_path=resolve(raw["vault_path"]),
-        data_path=resolve(raw["data_path"]),
-        inbox_path=resolve(raw["inbox_path"]),
-        pdf_store_path=resolve(raw["pdf_store_path"]),
-        database_path=resolve(raw["database_path"]),
-        grobid_url=raw.get("grobid_url", "http://localhost:8070").rstrip("/"),
-        use_grobid=bool(raw.get("use_grobid", True)),
-        crossref_email=raw.get("crossref_email", "you@example.com"),
-        use_local_llm=raw.get("use_local_llm", True),
-    )
-
-
-def sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def _save_extracted_text(data_path: Path, stored_pdf: Path, text: str) -> Path:
-    """Persist the full PDF text extraction for inspection and troubleshooting."""
-    output_dir = data_path / "extracted_text"
-    output_dir.mkdir(parents=True, exist_ok=True)
-    output = output_dir / f"{stored_pdf.stem}.txt"
-    output.write_text(text, encoding="utf-8")
-    return output
-
-
-def _text_without_references(text: str) -> str:
-    """Exclude a terminal bibliography from the text sent to the summarizer."""
-    heading = re.compile(
-        r"(?im)^[ \t]*(?:REFERENCES(?:[ \t]+AND[ \t]+NOTES)?|BIBLIOGRAPHY)[ \t]*$"
-    )
-    for match in heading.finditer(text):
-        if match.start() >= len(text) // 2:
-            return text[:match.start()].rstrip()
-    return text
 
 
 def _paper_id(doi: str | None, digest: str) -> str:
@@ -215,7 +149,7 @@ def _finalize_ingestion(
     metadata_error: str | None,
 ) -> dict[str, Any]:
     """Persist extracted text, resolve references, summarize, and write the note."""
-    extracted_text_path = _save_extracted_text(settings.data_path, source_pdf, text)
+    extracted_text_path = save_extracted_text(settings.data_path, source_pdf, text)
     report(f"Saved full extracted text: {extracted_text_path}")
 
     references_error = None
@@ -225,7 +159,9 @@ def _finalize_ingestion(
             report("Extracting bibliography with GROBID")
             references = extract_grobid_references(source_pdf, settings.grobid_url)
             citations, citation_errors = resolve_extracted_references(
-                references, settings.database_path, crossref
+                references,
+                lambda doi: paper_for_doi(settings.database_path, doi),
+                crossref,
             )
             insert_resolved_citations(settings.database_path, paper_id, citations)
         except (httpx.HTTPError, ET.ParseError, OSError) as exc:
@@ -236,7 +172,7 @@ def _finalize_ingestion(
 
     summary = None
     if summarizer and text:
-        summary_text = _text_without_references(text)
+        summary_text = text_without_references(text)
         report(
             f"Summarizing paper text ({len(summary_text):,} of "
             f"{len(text):,} characters; terminal references excluded)"
@@ -250,7 +186,7 @@ def _finalize_ingestion(
             citation["placeholder_note"] = str(
                 write_reference_placeholder(settings.vault_path, citation)
             )
-    summary = _link_summary_citations(summary, citations, settings.vault_path)
+    summary = link_summary_citations(summary, citations, settings.vault_path)
 
     report("Writing Obsidian note")
     note = write_paper_note(
@@ -346,19 +282,3 @@ def ingest_inbox(
                 runtime_control.report_thermal_state(f"PDF {index}/{len(pdfs)} failure", report)
     return results
 
-
-def write_review_queue(settings: Settings) -> Path:
-    """Write unresolved/ambiguous citation records to a human-review note."""
-    initialize_database(settings.database_path)
-    output = settings.vault_path / "90 System" / "Citation Review Queue.md"
-    output.parent.mkdir(parents=True, exist_ok=True)
-    rows = unresolved_citations(settings.database_path)
-    lines = ["# Citation Review Queue", "", "Review these references and link them to notes when appropriate.", ""]
-    for title, raw, doi, status in rows:
-        lines.append(f"- **{status}** — from *{title}*: {raw}")
-        if doi:
-            lines.append(f"  - DOI: https://doi.org/{doi}")
-    if not rows:
-        lines.append("_No pending citation records._")
-    output.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    return output

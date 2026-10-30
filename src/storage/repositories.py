@@ -3,11 +3,35 @@ from __future__ import annotations
 import json
 import sqlite3
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 if TYPE_CHECKING:
     from resolution.citations import CitationRecord
     from resolution.metadata import PaperMetadata
+
+
+class StoredDocument(NamedTuple):
+    """Row identifying an already-ingested PDF."""
+
+    id: str
+    paper_id: str
+    stored_path: str
+
+
+class PaperLocation(NamedTuple):
+    """Local library hit for a DOI, including its rendered note path."""
+
+    id: str
+    note_path: str | None
+
+
+class PendingCitation(NamedTuple):
+    """Citation awaiting human review, joined with its source paper title."""
+
+    title: str
+    raw_reference: str
+    doi: str | None
+    status: str
 
 
 def insert_extracted_citations(
@@ -48,11 +72,12 @@ def citations_for_paper(database_path: Path, paper_id: str) -> list[CitationReco
     return [dict(row) for row in rows]
 
 
-def document_for_digest(database_path: Path, digest: str) -> tuple | None:
+def document_for_digest(database_path: Path, digest: str) -> StoredDocument | None:
     with sqlite3.connect(database_path) as db:
-        return db.execute(
+        row = db.execute(
             "SELECT id, paper_id, stored_path FROM documents WHERE sha256=?", (digest,)
         ).fetchone()
+    return StoredDocument(*row) if row else None
 
 
 def update_document_path(database_path: Path, document_id: str, path: Path) -> None:
@@ -95,11 +120,12 @@ def paper_id_for_doi(database_path: Path, doi: str) -> str | None:
     return row[0] if row else None
 
 
-def paper_for_doi(database_path: Path, doi: str) -> tuple[str, str | None] | None:
+def paper_for_doi(database_path: Path, doi: str) -> PaperLocation | None:
     with sqlite3.connect(database_path) as db:
-        return db.execute(
+        row = db.execute(
             "SELECT id, note_path FROM papers WHERE lower(doi)=lower(?)", (doi,)
         ).fetchone()
+    return PaperLocation(*row) if row else None
 
 
 def save_ingestion(
@@ -185,11 +211,12 @@ def record_ingestion_failure(
         )
 
 
-def unresolved_citations(database_path: Path) -> list[tuple]:
+def unresolved_citations(database_path: Path) -> list[PendingCitation]:
     with sqlite3.connect(database_path) as db:
-        return db.execute(
+        rows = db.execute(
             """SELECT p.title, c.raw_reference, c.cited_doi, c.status
                FROM citations c JOIN papers p ON p.id=c.source_paper_id
                WHERE c.status IN ('unresolved', 'ambiguous', 'external')
                ORDER BY p.title"""
         ).fetchall()
+    return [PendingCitation(*row) for row in rows]

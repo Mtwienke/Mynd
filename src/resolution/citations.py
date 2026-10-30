@@ -1,10 +1,10 @@
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Required, TypedDict
 
 import httpx
 
 from resolution.crossref import CrossrefClient
-from storage.repositories import paper_for_doi
 
 
 class CitationRecord(TypedDict, total=False):
@@ -24,7 +24,9 @@ class CitationRecord(TypedDict, total=False):
 
 
 def resolve_extracted_references(
-    references: list[dict[str, Any]], database_path: Path, crossref: CrossrefClient | None
+    references: list[dict[str, Any]],
+    local_lookup: Callable[[str], tuple[str, str | None] | None],
+    crossref: CrossrefClient | None,
 ) -> tuple[list[CitationRecord], list[str]]:
     """Resolve extracted DOIs against the local library and then Crossref."""
     citations: list[CitationRecord] = []
@@ -36,7 +38,7 @@ def resolve_extracted_references(
         status = "unresolved"
         confidence = 0.0
         if doi:
-            target = paper_for_doi(database_path, doi)
+            target = local_lookup(doi)
             if target:
                 target_id, target_note = target
                 status, confidence = "resolved", 1.0

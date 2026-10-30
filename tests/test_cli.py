@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 from typer.testing import CliRunner
 
 from mynd.cli import app
-from mynd.core import Settings
+from mynd.settings import Settings
 
 runner = CliRunner()
 

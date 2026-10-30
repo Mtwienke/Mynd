@@ -3,11 +3,8 @@ from unittest.mock import patch
 
 import pytest
 
-from mynd.core import (
-    ingest_inbox,
-    ingest_pdf,
-    load_settings,
-)
+from mynd.core import ingest_inbox, ingest_pdf
+from mynd.settings import load_settings
 
 
 @pytest.fixture

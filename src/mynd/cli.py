@@ -4,12 +4,15 @@ from pathlib import Path
 import typer
 
 from ai.runtime import RuntimeControl
-from mynd.core import CrossrefClient, ingest_inbox, load_settings, write_review_queue
+from mynd.core import ingest_inbox
+from mynd.review import write_review_queue
+from mynd.settings import Settings, load_settings
+from resolution.crossref import CrossrefClient
 
 app = typer.Typer(help="Local-first research library for Obsidian.")
 
 
-def settings_from(config: Path):
+def settings_from(config: Path) -> Settings:
     if not config.exists():
         raise typer.BadParameter(f"Config file not found: {config}")
     return load_settings(config)
@@ -25,7 +28,7 @@ def ingest(
         "-v",
         help="Show Ollama request, allocation, and generation timing diagnostics",
     ),
-):
+) -> None:
     """Process every PDF in the configured inbox."""
     settings = settings_from(config)
     if mode is not None:
@@ -48,7 +51,7 @@ def ingest(
 def set_mode(
     mode: str = typer.Argument(..., help="Inference mode: normal or silent"),
     config: Path = typer.Option(Path("config.toml"), "--config", "-c"),
-):
+) -> None:
     """Change inference mode for a running or future ingestion job."""
     settings = settings_from(config)
     control = RuntimeControl(settings.data_path / ".mynd-mode")
@@ -62,7 +65,7 @@ def set_mode(
 @app.command()
 def review_queue(
     config: Path = typer.Option(Path("config.toml"), "--config", "-c"),
-):
+) -> None:
     """Generate a Markdown queue for citations needing review."""
     settings = settings_from(config)
     path = write_review_queue(settings)
@@ -72,7 +75,7 @@ def review_queue(
 @app.command()
 def doctor(
     config: Path = typer.Option(Path("config.toml"), "--config", "-c"),
-):
+) -> None:
     """Create directories and check basic configuration."""
     settings = settings_from(config)
     for path in (settings.inbox_path, settings.pdf_store_path, settings.vault_path):

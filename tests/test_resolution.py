@@ -100,13 +100,11 @@ def test_metadata_from_crossref_falls_back_to_issued_date():
     assert metadata["year"] == 1999
 
 
-def test_resolve_extracted_references_local_hit(tmp_path, monkeypatch):
-    monkeypatch.setattr(
-        "resolution.citations.paper_for_doi",
-        lambda db, doi: ("paper-1", "notes/paper-1.md"),
-    )
+def test_resolve_extracted_references_local_hit():
     citations, errors = resolve_extracted_references(
-        [{"raw_reference": "Ref A", "doi": "10.1/a"}], tmp_path, None
+        [{"raw_reference": "Ref A", "doi": "10.1/a"}],
+        lambda doi: ("paper-1", "notes/paper-1.md"),
+        None,
     )
     assert errors == []
     assert citations[0]["status"] == "resolved"
@@ -115,33 +113,31 @@ def test_resolve_extracted_references_local_hit(tmp_path, monkeypatch):
     assert citations[0]["target_note"] == "notes/paper-1.md"
 
 
-def test_resolve_extracted_references_external_hit(tmp_path, monkeypatch):
-    monkeypatch.setattr("resolution.citations.paper_for_doi", lambda db, doi: None)
+def test_resolve_extracted_references_external_hit():
     crossref = MagicMock()
     crossref.by_doi.return_value = {"DOI": "10.1/a"}
     citations, errors = resolve_extracted_references(
-        [{"raw_reference": "Ref A", "doi": "10.1/a"}], tmp_path, crossref
+        [{"raw_reference": "Ref A", "doi": "10.1/a"}], lambda doi: None, crossref
     )
     assert errors == []
     assert citations[0]["status"] == "external"
     assert citations[0]["confidence"] == 0.95
 
 
-def test_resolve_extracted_references_no_doi_is_unresolved(tmp_path):
+def test_resolve_extracted_references_no_doi_is_unresolved():
     citations, errors = resolve_extracted_references(
-        [{"raw_reference": "No DOI"}], tmp_path, None
+        [{"raw_reference": "No DOI"}], lambda doi: None, None
     )
     assert errors == []
     assert citations[0]["status"] == "unresolved"
     assert citations[0]["confidence"] == 0.0
 
 
-def test_resolve_extracted_references_records_http_errors(tmp_path, monkeypatch):
-    monkeypatch.setattr("resolution.citations.paper_for_doi", lambda db, doi: None)
+def test_resolve_extracted_references_records_http_errors():
     crossref = MagicMock()
     crossref.by_doi.side_effect = httpx.HTTPError("boom")
     citations, errors = resolve_extracted_references(
-        [{"raw_reference": "Ref", "doi": "10.1/a"}], tmp_path, crossref
+        [{"raw_reference": "Ref", "doi": "10.1/a"}], lambda doi: None, crossref
     )
     assert citations[0]["status"] == "unresolved"
     assert errors == ["10.1/a: boom"]

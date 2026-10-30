@@ -152,26 +152,30 @@ class OllamaGenerator:
             flush=True,
         )
         try:
-            # Use Popen to stream output from 'ollama pull' to the terminal. The
-            # executable is resolved to a full path and the arguments are fixed,
-            # trusted values, never shell-interpreted user input.
-            process = subprocess.Popen(  # nosec B603 B607 - fixed local binary, no shell
+            # The executable and arguments are fixed, trusted values, never
+            # shell-interpreted user input. A bounded timeout prevents a stuck
+            # download from hanging ingestion indefinitely.
+            result = subprocess.run(  # nosec B603 B607 - fixed local binary, no shell
                 ["ollama", "pull", self.model],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
+                capture_output=True,
                 text=True,
+                timeout=900,
+                check=False,
             )
-            for line in process.stdout:
-                print(f"  [Ollama] {line.rstrip()}", file=sys.stderr, flush=True)
-
-            process.wait()
-            if process.returncode != 0:
+            for line in (result.stdout or "").splitlines():
+                print(f"  [Ollama] {line}", file=sys.stderr, flush=True)
+            if result.returncode != 0:
+                detail = (result.stderr or "").strip() or f"exit code {result.returncode}"
                 raise subprocess.CalledProcessError(
-                    process.returncode, ["ollama", "pull", self.model]
+                    result.returncode, ["ollama", "pull", self.model], output=detail
                 )
 
             return self.is_running()
-        except (subprocess.CalledProcessError, FileNotFoundError) as e:
+        except (
+            subprocess.CalledProcessError,
+            subprocess.TimeoutExpired,
+            FileNotFoundError,
+        ) as e:
             logger.error("Failed to pull Ollama model %s: %s", self.model, e)
             print(f"[ai] Failed to download model {self.model}: {e}", file=sys.stderr, flush=True)
             return False
