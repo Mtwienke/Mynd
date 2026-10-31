@@ -1,3 +1,4 @@
+import time
 from pathlib import Path
 
 import httpx
@@ -15,14 +16,26 @@ def extract_grobid_references(
     timeout: float = 90.0,
 ) -> list[ReferenceRecord]:
     """Extract bibliography records from a PDF using a running GROBID service."""
-    with pdf_path.open("rb") as handle:
-        response = httpx.post(
-            f"{base_url.rstrip('/')}/api/processReferences",
-            files={"input": (pdf_path.name, handle, "application/pdf")},
-            data={"consolidateCitations": "0"},
-            timeout=timeout,
-        )
-    response.raise_for_status()
+    response = None
+    for attempt in range(3):
+        try:
+            with pdf_path.open("rb") as handle:
+                response = httpx.post(
+                    f"{base_url.rstrip('/')}/api/processReferences",
+                    files={"input": (pdf_path.name, handle, "application/pdf")},
+                    data={"consolidateCitations": "0"},
+                    timeout=timeout,
+                )
+            response.raise_for_status()
+            break
+        except (httpx.ConnectError, httpx.ReadTimeout):
+            if attempt == 2:
+                raise
+            time.sleep(1 * (attempt + 1))
+
+    if response is None:
+        raise RuntimeError("GROBID service unavailable after retries")
+
     root = ET.fromstring(response.text)
     namespace = {"tei": TEI_NAMESPACE}
     references: list[ReferenceRecord] = []
