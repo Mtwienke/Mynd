@@ -93,7 +93,7 @@ def doctor(
     if start_grobid and settings.use_grobid:
         typer.echo("Attempting to start GROBID via Docker...")
         try:
-            subprocess.run(["docker", "run", "-d", "--rm", "-p", "8070:8070", "grobid/grobid:latest"], check=True)
+            subprocess.run(["docker", "run", "-d", "--rm", "-p", "8070:8070", "grobid/grobid:0.9.1-crf"], check=True)
         except subprocess.CalledProcessError:
             typer.echo("Error: Docker command failed. Please ensure Docker/OrbStack is running.")
         import time
