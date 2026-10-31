@@ -27,7 +27,6 @@ class Settings:
     grobid_url: str = DEFAULT_GROBID_URL
     use_grobid: bool = True
     crossref_email: str = DEFAULT_CROSSREF_EMAIL
-    use_local_llm: bool = True
     allow_remote_services: bool = False
 
     @property
@@ -59,6 +58,5 @@ def load_settings(path: Path) -> Settings:
         grobid_url=str(raw.get("grobid_url", DEFAULT_GROBID_URL)).rstrip("/"),
         use_grobid=bool(raw.get("use_grobid", True)),
         crossref_email=raw.get("crossref_email", DEFAULT_CROSSREF_EMAIL),
-        use_local_llm=bool(raw.get("use_local_llm", True)),
         allow_remote_services=bool(raw.get("allow_remote_services", False)),
     )

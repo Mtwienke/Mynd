@@ -314,16 +314,15 @@ def _prepare_runtime(
     """Start runtime control and resolve the summarizer for this batch."""
     runtime_control = RuntimeControl(settings.mode_file)
     progress(f"Inference mode: {runtime_control.mode()}")
-    if settings.use_local_llm and not MacThermalMonitor.supported():
+    if not MacThermalMonitor.supported():
         progress(
             f"Automatic thermal response is not implemented for {sys.platform}; "
             "mode limits still work"
         )
-    if settings.use_local_llm and verbose:
+    if verbose:
         runtime_control.report_thermal_state("ingestion start", progress)
 
     generator = build_text_generator(
-        use_local=settings.use_local_llm,
         runtime_control=runtime_control,
         progress=progress,
         verbose=verbose,
@@ -368,7 +367,7 @@ def _ingest_batch(
             progress(f"Failed {progress_label}: {pdf.name}: {exc}")
             progress_label += " failure"
         results.append(result)
-        if settings.use_local_llm and verbose:
+        if verbose:
             runtime_control.report_thermal_state(progress_label, progress)
     return results
 

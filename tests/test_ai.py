@@ -4,13 +4,12 @@ import httpx
 import pytest
 
 from ai.base import TextGenerator
-from ai.hosted import HostedGenerator
 from ai.local import OllamaConfig, OllamaGenerator
 from ai.models import build_text_generator
 
 
 def test_text_generator_protocol_accepts_concrete_backends():
-    assert isinstance(HostedGenerator(), TextGenerator)
+    assert isinstance(OllamaGenerator(OllamaConfig(model="mistral")), TextGenerator)
 
 
 def test_text_generator_protocol_rejects_incomplete_backends():
@@ -20,21 +19,8 @@ def test_text_generator_protocol_rejects_incomplete_backends():
     assert not isinstance(Incomplete(), TextGenerator)
 
 
-def test_build_text_generator_local():
-    assert isinstance(build_text_generator(use_local=True), OllamaGenerator)
-
-
-def test_build_text_generator_hosted():
-    assert isinstance(build_text_generator(use_local=False), HostedGenerator)
-
-
-def test_hosted_generator_reports_unavailable_and_refuses_to_fabricate():
-    generator = HostedGenerator()
-    assert generator.is_running() is False
-    assert generator.ensure_model() is False
-    with pytest.raises(NotImplementedError, match="not implemented"):
-        generator.generate("hi")
-    generator.close()
+def test_build_text_generator_returns_local_backend():
+    assert isinstance(build_text_generator(), OllamaGenerator)
 
 
 def test_ollama_generator_is_running_true():

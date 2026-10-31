@@ -97,4 +97,4 @@ Keep that process running, then ingest PDFs. If GROBID is unavailable, the PDF a
 
 ## Privacy
 
-PDFs, extracted text, and SQLite data are stored locally. Crossref receives DOI lookup requests, and a locally run GROBID service receives the PDF for bibliography extraction. With the default local model setting, extracted paper text (excluding a terminal bibliography) is sent to the configured Ollama model on your machine for summarization and reference annotation. If the hosted-model setting is selected, the current hosted backend is a placeholder that reports itself unavailable and refuses to generate text, so summarization is skipped.
+PDFs, extracted text, and SQLite data are stored locally. Crossref receives DOI lookup requests, and a locally run GROBID service receives the PDF for bibliography extraction. Extracted paper text (excluding a terminal bibliography) is sent to the configured Ollama model on your machine for summarization and reference annotation. Mynd has no hosted-model backend: summarization always runs locally, and if Ollama or the model is unavailable, ingestion continues without a summary.

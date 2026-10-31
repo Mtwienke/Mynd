@@ -64,7 +64,6 @@ def test_load_settings_resolves_paths_relative_to_config(tmp_path):
     assert settings.database_path == tmp_path / "library.sqlite3"
     assert settings.grobid_url == "http://localhost:8070"
     assert settings.use_grobid is False
-    assert settings.use_local_llm is True
 
 
 def test_write_review_queue_lists_unresolved_citations(tmp_path):

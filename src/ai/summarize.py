@@ -17,7 +17,7 @@ class SummaryWriter:
 
     Long papers are summarized in overlapping text chunks, then condensed into
     one final summary. File access and model connectivity belong to the injected
-    generator, keeping this class easy to use with local or hosted backends.
+    generator, so the writer only depends on the TextGenerator protocol.
     """
 
     generator: TextGenerator
