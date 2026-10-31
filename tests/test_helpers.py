@@ -6,12 +6,12 @@ import pymupdf
 from ingestion.extract_text import extract_text_and_doi
 from ingestion.text import save_extracted_text, text_without_references
 from mynd.files import sha256_file
-from mynd.review import write_review_queue
 from mynd.settings import load_settings
 from resolution.doi import normalize_doi
 from storage.database import initialize_database
 from storage.repositories import IngestedDocument, insert_resolved_citations, save_ingestion
 from vault.note_writer import PaperNote, write_paper_note
+from vault.review_queue import write_review_queue
 
 
 def test_normalize_doi():

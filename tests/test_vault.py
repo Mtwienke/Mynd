@@ -91,13 +91,13 @@ def test_link_summary_citations_replaces_numbers(tmp_path):
         {"raw_reference": "two", "placeholder_note": note},
         {"raw_reference": "three"},
     ]
-    linked = link_summary_citations(summary, citations, vault)
+    linked = link_summary_citations(vault, summary, citations)
     assert "[[10 Papers/Target (abc123)]]" in linked
     assert ", 3)" in linked
 
 
 def test_link_summary_citations_none_summary():
-    assert link_summary_citations(None, [], Path("/tmp")) is None
+    assert link_summary_citations(Path("/tmp"), None, []) is None
 
 
 def test_migrate_legacy_note_renames(tmp_path):

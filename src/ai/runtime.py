@@ -14,6 +14,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import ClassVar, TypedDict, cast
 
+from mynd.contracts import InferenceMode
 from mynd.files import atomic_write_text
 
 
@@ -155,7 +156,7 @@ class MacHardwareMonitor:
 class RuntimeControl:
     """Shared mode file and thermal policy used by a running ingestion job."""
 
-    VALID_MODES: ClassVar[frozenset[str]] = frozenset({"normal", "silent"})
+    VALID_MODES: ClassVar[frozenset[InferenceMode]] = frozenset({"normal", "silent"})
     HOT_STATES: ClassVar[frozenset[str]] = frozenset({"serious", "critical"})
 
     def __init__(self, state_path: Path):
@@ -175,12 +176,12 @@ class RuntimeControl:
             snapshot, _error = self.hardware_snapshot()
         return any(rpm > 0 for rpm in MacHardwareMonitor.fan_rpms(snapshot))
 
-    def mode(self) -> str:
+    def mode(self) -> InferenceMode:
         try:
             value = self.state_path.read_text(encoding="utf-8").strip().lower()
         except OSError:
             return "normal"
-        return value if value in self.VALID_MODES else "normal"
+        return "normal" if value not in self.VALID_MODES else cast(InferenceMode, value)
 
     def set_mode(self, mode: str) -> None:
         value = mode.strip().lower()
@@ -194,9 +195,9 @@ class RuntimeControl:
         return MacThermalMonitor.state()
 
     def report_thermal_state(
-        self, checkpoint: str, report: Callable[[str], None] | None = None
+        self, checkpoint: str, progress: Callable[[str], None] | None = None
     ) -> None:
-        log = report or (lambda _message: None)
+        log = progress or (lambda _message: None)
         if self.mode() != "silent":
             state = "inactive (normal mode)"
         else:
@@ -208,7 +209,7 @@ class RuntimeControl:
 
     def ollama_options(
         self,
-        mode: str | None = None,
+        mode: InferenceMode | None = None,
         fan_active: bool = False,
     ) -> dict[str, int]:
         selected_mode = mode or self.mode()
@@ -221,10 +222,10 @@ class RuntimeControl:
 
     def wait_until_safe(
         self,
-        report: Callable[[str], None] | None = None,
+        progress: Callable[[str], None] | None = None,
         poll_seconds: float = 10.0,
     ) -> None:
-        log = report or (lambda _message: None)
+        log = progress or (lambda _message: None)
         reported = False
         while self.thermal_state() in self.HOT_STATES:
             if not reported:

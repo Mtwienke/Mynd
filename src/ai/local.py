@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import logging
 import subprocess  # nosec B404 - used only for fixed, trusted local CLI tools (ollama)
-import sys
 import threading
 import time
 from collections.abc import Callable
@@ -11,6 +10,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import httpx
+
+from mynd.contracts import InferenceMode
 
 if TYPE_CHECKING:
     from ai.runtime import RuntimeControl
@@ -55,7 +56,7 @@ class OllamaConfig:
 class _Attempt:
     """Thermal context captured before one model request is sent."""
 
-    mode: str | None
+    mode: InferenceMode | None
     fan_active: bool
 
 
@@ -186,11 +187,9 @@ class OllamaGenerator:
         if self.is_running():
             return True
 
-        print(
-            f"[ai] Model {self.model} is not available from Ollama; running `ollama pull {self.model}`. "
-            "Ollama's layer download progress follows:",
-            file=sys.stderr,
-            flush=True,
+        self.progress(
+            f"Model {self.model} is not available from Ollama; running "
+            f"`ollama pull {self.model}`. Ollama's layer download progress follows:"
         )
         try:
             # The executable and arguments are fixed, trusted values, never
@@ -226,7 +225,6 @@ class OllamaGenerator:
                 self.progress(
                     "Thermal state changed; restarting this model request with safe limits"
                 )
-                runtime.wait_until_safe(self.progress)
                 continue
             result = "".join(pieces).strip()
             if not result:

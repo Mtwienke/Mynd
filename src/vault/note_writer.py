@@ -94,8 +94,8 @@ This placeholder was created from a citation. Ingest the paper to replace it wit
 
 
 def _obsidian_link(vault: Path, target: str | Path) -> str:
-    """Build a vault-relative Obsidian link to an existing note path."""
-    path = migrate_legacy_note(Path(target))
+    """Build a vault-relative Obsidian link without touching the filesystem."""
+    path = Path(target)
     try:
         link_path = path.resolve().relative_to(vault.resolve()).with_suffix("")
     except ValueError:
@@ -104,7 +104,7 @@ def _obsidian_link(vault: Path, target: str | Path) -> str:
 
 
 def link_summary_citations(
-    summary: str | None, citations: list[CitationRecord], vault: Path
+    vault: Path, summary: str | None, citations: list[CitationRecord]
 ) -> str | None:
     """Replace numeric bibliography callouts with links in bibliography order."""
     if not summary:

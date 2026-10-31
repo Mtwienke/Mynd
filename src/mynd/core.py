@@ -185,7 +185,7 @@ def _enrich_metadata(
                 {key: value for key, value in metadata_from_crossref(item).items()
                  if value is not None}
             )
-    except (httpx.HTTPError, ValueError) as exc:
+    except (httpx.HTTPError, ValueError, KeyError, TypeError, IndexError) as exc:
         return str(exc)
     return None
 
@@ -221,7 +221,7 @@ def _finalize_ingestion(
             citation["placeholder_note"] = str(
                 write_reference_placeholder(settings.vault_path, citation)
             )
-    summary = link_summary_citations(summary, citations, settings.vault_path)
+    summary = link_summary_citations(settings.vault_path, summary, citations)
 
     progress("Writing Obsidian note")
     note = write_paper_note(
