@@ -14,6 +14,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import ClassVar, TypedDict, cast
 
+from mynd.files import atomic_write_text
+
 
 class FanReading(TypedDict, total=False):
     """One fan entry reported by the `macmon` CLI."""
@@ -184,10 +186,7 @@ class RuntimeControl:
         value = mode.strip().lower()
         if value not in self.VALID_MODES:
             raise ValueError(f"Mode must be one of: {', '.join(sorted(self.VALID_MODES))}")
-        self.state_path.parent.mkdir(parents=True, exist_ok=True)
-        temp = self.state_path.with_suffix(self.state_path.suffix + ".tmp")
-        temp.write_text(value + "\n", encoding="utf-8")
-        os.replace(temp, self.state_path)
+        atomic_write_text(self.state_path, value + "\n")
 
     def thermal_state(self) -> str | None:
         if self.mode() != "silent":
