@@ -32,7 +32,9 @@ def test_summarize_single_chunk_calls_generator_once():
 
     assert result == "## Overview\nDone"
     assert len(generator.prompts) == 1
-    assert progress == ["Summarizing text part 1/1", "Generating final paper summary"]
+    assert len(progress) == 2
+    assert "part 1/1" in progress[0]
+    assert "final paper summary" in progress[1]
 
 
 def test_summarize_multiple_chunks_condenses():

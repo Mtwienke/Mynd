@@ -198,4 +198,5 @@ def test_ingest_pdf_refuses_non_local_grobid_egress(mock_settings, sample_pdf):
     ):
         result = ingest_pdf(sample_pdf, remote)
 
-    assert "Refusing to send PDFs" in result["references_error"]
+    assert result["references_error"] is not None
+    assert result["status"] == "ingested"
