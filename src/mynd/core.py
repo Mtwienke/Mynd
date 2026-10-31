@@ -219,7 +219,7 @@ def _finalize_ingestion(
     for citation in citations:
         if not citation.get("target_note"):
             citation["placeholder_note"] = str(
-                write_reference_placeholder(settings.vault_path, citation, prepared.paper_id)
+                write_reference_placeholder(settings.vault_path, citation, prepared.metadata.get("title") or prepared.source_pdf.stem, prepared.paper_id)
             )
     summary = link_summary_citations(settings.vault_path, summary, citations)
 

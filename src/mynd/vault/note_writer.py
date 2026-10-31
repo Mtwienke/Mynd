@@ -63,7 +63,7 @@ class PaperNote:
     summary: str | None = None
 
 
-def write_reference_placeholder(vault: Path, citation: CitationRecord, citing_paper_id: str) -> Path:
+def write_reference_placeholder(vault: Path, citation: CitationRecord, citing_title: str, citing_paper_id: str) -> Path:
     """Create a stable note for a cited work that has not been ingested."""
     doi = normalize_doi(citation.get("doi"))
     raw = _sanitize_inline(citation.get("raw_reference", ""))
@@ -94,7 +94,7 @@ This placeholder was created from a citation. Ingest the paper to replace it wit
 
 - **DOI:** {_doi_display(doi or "")}
 - **Year:** [[{year}]]
-- **Cited by:** [[{citing_paper_id}]]
+- **Cited by:** [[{citing_title} ({citing_paper_id})]]
 - **Citation as extracted:** {raw}
 '''
     atomic_write_text(path, content)
