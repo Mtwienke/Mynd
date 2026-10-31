@@ -1,4 +1,5 @@
 import json
+import subprocess
 from pathlib import Path
 
 import httpx
@@ -79,6 +80,7 @@ def review_queue(
 @app.command()
 def doctor(
     config: Path = typer.Option(Path("config.toml"), "--config", "-c"),
+    start_grobid: bool = typer.Option(False, "--start-grobid", help="Attempt to start GROBID via Docker if unavailable"),
 ) -> None:
     """Create directories and check basic configuration."""
     settings = settings_from(config)
@@ -88,6 +90,11 @@ def doctor(
     typer.echo(f"Inbox: {settings.inbox_path}")
     typer.echo(f"PDF store: {settings.pdf_store_path}")
     typer.echo(f"Database: {settings.database_path}")
+    if start_grobid and settings.use_grobid:
+        typer.echo("Attempting to start GROBID via Docker...")
+        subprocess.run(["docker", "run", "-d", "--rm", "-p", "8070:8070", "grobid/grobid:latest"], check=False)
+        import time
+        time.sleep(5)  # Give it a moment to spin up
     grobid_status = "Disabled"
     if settings.use_grobid:
         try:
