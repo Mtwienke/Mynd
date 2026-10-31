@@ -2,9 +2,9 @@ from unittest.mock import MagicMock
 
 import httpx
 
-from resolution.citations import resolve_extracted_references
-from resolution.crossref import CrossrefClient, metadata_from_crossref
-from resolution.doi import normalize_doi
+from mynd.resolution.citations import resolve_extracted_references
+from mynd.resolution.crossref import CrossrefClient, metadata_from_crossref
+from mynd.resolution.doi import normalize_doi
 
 
 def test_normalize_doi_url_and_text():

@@ -4,7 +4,7 @@ from urllib.parse import quote
 import httpx
 
 from mynd.contracts import PaperMetadata
-from resolution.doi import normalize_doi
+from mynd.resolution.doi import normalize_doi
 
 CROSSREF_API_URL = "https://api.crossref.org"
 

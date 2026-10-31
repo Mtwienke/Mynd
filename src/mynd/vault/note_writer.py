@@ -13,7 +13,7 @@ from mynd.identity import (
     note_filename,
     title_work_id,
 )
-from resolution.doi import normalize_doi
+from mynd.resolution.doi import normalize_doi
 
 _SECTION_HEADINGS = ("Summary", "My notes", "Questions", "Reading log")
 _DOI_LINK = "[doi:{doi}](https://doi.org/{doi})"

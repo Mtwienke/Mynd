@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pymupdf
 
-from resolution.doi import normalize_doi
+from mynd.resolution.doi import normalize_doi
 
 
 def extract_text_and_doi(path: Path) -> tuple[str, str | None]:

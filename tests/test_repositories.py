@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from storage import repositories
-from storage.database import initialize_database
+from mynd.storage import repositories
+from mynd.storage.database import initialize_database
 
 
 @pytest.fixture

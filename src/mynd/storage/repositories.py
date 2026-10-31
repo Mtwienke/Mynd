@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 from mynd.contracts import CitationRecord, PaperMetadata
-from storage.database import connect
+from mynd.storage.database import connect
 
 _INSERT_CITATION_SQL = """\
 INSERT OR IGNORE INTO citations

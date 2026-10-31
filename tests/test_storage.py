@@ -1,6 +1,6 @@
 import sqlite3
 
-from storage.database import initialize_database
+from mynd.storage.database import initialize_database
 
 
 def _tables(path):

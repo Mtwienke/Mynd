@@ -10,11 +10,14 @@ The installable code lives under `src/` and is split by responsibility:
 | Package | Responsibility |
 | --- | --- |
 | `mynd` | CLI, ingestion coordinator, settings, shared contracts, file and identity primitives |
-| `ingestion` | PDF text and GROBID bibliography extraction |
-| `resolution` | DOI normalization, Crossref lookup, and reference resolution |
-| `storage` | SQLite schema and row-level persistence helpers |
-| `vault` | Obsidian note rendering and citation linking |
-| `ai` | Local Ollama backend, runtime controls, and summarization |
+| `mynd.ingestion` | PDF text and GROBID bibliography extraction |
+| `mynd.resolution` | DOI normalization, Crossref lookup, and reference resolution |
+| `mynd.storage` | SQLite schema and row-level persistence helpers |
+| `mynd.vault` | Obsidian note rendering and citation linking |
+| `mynd.ai` | Local Ollama backend, runtime controls, and summarization |
+
+Every domain package is nested under the `mynd` distribution package, so a
+normal install exposes only `mynd` as a top-level import.
 
 ## Requirements
 

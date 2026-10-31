@@ -10,12 +10,9 @@ from urllib.parse import urlparse
 import httpx
 from defusedxml import ElementTree as ET
 
-from ai.models import build_text_generator
-from ai.runtime import MacThermalMonitor, RuntimeControl
-from ai.summarize import SummaryWriter
-from ingestion.extract_references import extract_grobid_references
-from ingestion.extract_text import extract_text_and_doi
-from ingestion.text import save_extracted_text, text_without_references
+from mynd.ai.models import build_text_generator
+from mynd.ai.runtime import MacThermalMonitor, RuntimeControl
+from mynd.ai.summarize import SummaryWriter
 from mynd.contracts import (
     CitationRecord,
     IngestionFailure,
@@ -25,12 +22,15 @@ from mynd.contracts import (
 )
 from mynd.files import sha256_file
 from mynd.identity import doi_work_id, file_work_id
+from mynd.ingestion.extract_references import extract_grobid_references
+from mynd.ingestion.extract_text import extract_text_and_doi
+from mynd.ingestion.text import save_extracted_text, text_without_references
+from mynd.resolution.citations import resolve_extracted_references
+from mynd.resolution.crossref import CrossrefClient, metadata_from_crossref
 from mynd.settings import Settings
-from resolution.citations import resolve_extracted_references
-from resolution.crossref import CrossrefClient, metadata_from_crossref
-from storage import repositories
-from storage.database import initialize_database
-from vault.note_writer import (
+from mynd.storage import repositories
+from mynd.storage.database import initialize_database
+from mynd.vault.note_writer import (
     PaperNote,
     link_summary_citations,
     write_paper_note,

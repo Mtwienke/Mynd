@@ -14,7 +14,7 @@ import httpx
 from mynd.contracts import InferenceMode
 
 if TYPE_CHECKING:
-    from ai.runtime import RuntimeControl
+    from mynd.ai.runtime import RuntimeControl
 
 logger = logging.getLogger(__name__)
 

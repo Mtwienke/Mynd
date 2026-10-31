@@ -3,11 +3,11 @@ from pathlib import Path
 
 import typer
 
-from ai.runtime import RuntimeControl
+from mynd.ai.runtime import RuntimeControl
 from mynd.core import ingest_inbox
+from mynd.resolution.crossref import CrossrefClient
 from mynd.settings import Settings, load_settings
-from resolution.crossref import CrossrefClient
-from vault.review_queue import write_review_queue
+from mynd.vault.review_queue import write_review_queue
 
 app = typer.Typer(help="Local-first research library for Obsidian.")
 

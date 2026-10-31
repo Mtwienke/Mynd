@@ -22,6 +22,7 @@ mynd = "mynd.cli:app"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+include = ["mynd*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

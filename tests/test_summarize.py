@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from ai.summarize import SummaryWriter
+from mynd.ai.summarize import SummaryWriter
 
 
 class FakeGenerator:

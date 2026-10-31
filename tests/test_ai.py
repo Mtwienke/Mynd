@@ -3,9 +3,9 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 
-from ai.base import TextGenerator
-from ai.local import OllamaConfig, OllamaGenerator
-from ai.models import build_text_generator
+from mynd.ai.base import TextGenerator
+from mynd.ai.local import OllamaConfig, OllamaGenerator
+from mynd.ai.models import build_text_generator
 
 
 def test_text_generator_protocol_accepts_concrete_backends():
@@ -60,9 +60,10 @@ def test_ollama_generator_ensure_model_pulls_with_timeout():
     completed.stdout = "pulling\ndone\n"
     completed.stderr = ""
     completed.returncode = 0
-    with patch.object(
-        OllamaGenerator, "is_running", side_effect=[False, True]
-    ), patch("ai.local.subprocess.run", return_value=completed) as run:
+    with (
+        patch.object(OllamaGenerator, "is_running", side_effect=[False, True]),
+        patch("mynd.ai.local.subprocess.run", return_value=completed) as run,
+    ):
         assert gen.ensure_model() is True
     run.assert_called_once()
     assert run.call_args.args[0] == ["ollama", "pull", "mistral"]
@@ -71,8 +72,9 @@ def test_ollama_generator_ensure_model_pulls_with_timeout():
 
 def test_ollama_generator_ensure_model_reports_failure():
     gen = OllamaGenerator(OllamaConfig(model="mistral"))
-    with patch.object(OllamaGenerator, "is_running", return_value=False), patch(
-        "ai.local.subprocess.run", side_effect=FileNotFoundError("no ollama")
+    with (
+        patch.object(OllamaGenerator, "is_running", return_value=False),
+        patch("mynd.ai.local.subprocess.run", side_effect=FileNotFoundError("no ollama")),
     ):
         assert gen.ensure_model() is False
 

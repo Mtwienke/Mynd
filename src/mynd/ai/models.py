@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from ai.base import TextGenerator
-from ai.local import OllamaGenerator
-from ai.runtime import RuntimeControl
+from mynd.ai.base import TextGenerator
+from mynd.ai.local import OllamaGenerator
+from mynd.ai.runtime import RuntimeControl
 
 
 def build_text_generator(

@@ -2,8 +2,8 @@ from unittest.mock import MagicMock, patch
 
 import pymupdf
 
-from ingestion.extract_references import extract_grobid_references
-from ingestion.extract_text import extract_text_and_doi
+from mynd.ingestion.extract_references import extract_grobid_references
+from mynd.ingestion.extract_text import extract_text_and_doi
 
 
 def _write_pdf(path, text_lines):
@@ -65,7 +65,7 @@ def test_extract_grobid_references_parses_tei(tmp_path):
     response.text = GROBID_XML
     response.raise_for_status.return_value = None
 
-    with patch("ingestion.extract_references.httpx.post", return_value=response) as post:
+    with patch("mynd.ingestion.extract_references.httpx.post", return_value=response) as post:
         references = extract_grobid_references(pdf, base_url="http://localhost:8070")
 
     assert len(references) == 2
@@ -83,5 +83,5 @@ def test_extract_grobid_references_empty_bibliography(tmp_path):
     response.text = '<TEI xmlns="http://www.tei-c.org/ns/1.0"><text/></TEI>'
     response.raise_for_status.return_value = None
 
-    with patch("ingestion.extract_references.httpx.post", return_value=response):
+    with patch("mynd.ingestion.extract_references.httpx.post", return_value=response):
         assert extract_grobid_references(pdf, base_url="http://localhost:8070") == []

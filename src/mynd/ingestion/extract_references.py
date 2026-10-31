@@ -4,7 +4,7 @@ import httpx
 from defusedxml import ElementTree as ET
 
 from mynd.contracts import ReferenceRecord
-from resolution.doi import normalize_doi
+from mynd.resolution.doi import normalize_doi
 
 TEI_NAMESPACE = "http://www.tei-c.org/ns/1.0"
 

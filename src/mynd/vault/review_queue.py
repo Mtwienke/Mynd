@@ -4,8 +4,8 @@ from pathlib import Path
 
 from mynd.files import atomic_write_text
 from mynd.settings import Settings
-from storage.database import initialize_database
-from storage.repositories import unresolved_citations
+from mynd.storage.database import initialize_database
+from mynd.storage.repositories import unresolved_citations
 
 
 def write_review_queue(settings: Settings) -> Path:

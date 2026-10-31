@@ -5,7 +5,7 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from ai.base import TextGenerator
+from mynd.ai.base import TextGenerator
 from mynd.contracts import CitationRecord, PaperMetadata
 
 logger = logging.getLogger(__name__)

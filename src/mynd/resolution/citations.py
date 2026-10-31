@@ -3,7 +3,7 @@ from collections.abc import Callable
 import httpx
 
 from mynd.contracts import CitationRecord, ReferenceRecord
-from resolution.crossref import CrossrefClient
+from mynd.resolution.crossref import CrossrefClient
 
 
 def resolve_extracted_references(

@@ -2,7 +2,7 @@ from pathlib import Path
 
 from mynd.files import atomic_write_text
 from mynd.identity import migrate_legacy_note, slugify
-from vault.note_writer import (
+from mynd.vault.note_writer import (
     PaperNote,
     _yaml_quote,
     link_summary_citations,
@@ -41,9 +41,7 @@ def test_write_paper_note_creates_note_with_sections(tmp_path):
         "abstract": "An abstract.",
     }
     path = write_paper_note(
-        PaperNote(
-            tmp_path / "vault", "paper-abcdef123456", metadata, pdf, summary="My summary"
-        )
+        PaperNote(tmp_path / "vault", "paper-abcdef123456", metadata, pdf, summary="My summary")
     )
     content = path.read_text(encoding="utf-8")
     assert "# A Study" in content
