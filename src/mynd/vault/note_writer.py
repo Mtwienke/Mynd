@@ -63,22 +63,28 @@ class PaperNote:
     summary: str | None = None
 
 
-def write_reference_placeholder(vault: Path, citation: CitationRecord) -> Path:
+def write_reference_placeholder(vault: Path, citation: CitationRecord, citing_paper_id: str) -> Path:
     """Create a stable note for a cited work that has not been ingested."""
     doi = normalize_doi(citation.get("doi"))
     raw = _sanitize_inline(citation.get("raw_reference", ""))
     title = _sanitize_inline(citation.get("title") or raw or "Unknown reference")
     paper_id = doi_work_id(doi) if doi else title_work_id(title)
+
+    # Extract year from raw reference if possible (look for 4 digits in parens)
+    year_match = re.search(r"\(\s*(\d{4})\s*\)", raw)
+    year = year_match.group(1) if year_match else "Unknown"
+
     placeholders_dir = vault / "11 Citation Placeholders"
     placeholders_dir.mkdir(parents=True, exist_ok=True)
     path = placeholders_dir / note_filename(title, paper_id)
     if path.exists():
         return path
+
     content = f'''---
 type: paper-placeholder
 work_id: {_yaml_quote(paper_id)}
 doi: {_yaml_quote(doi or "")}
-year: null
+year: {_yaml_quote(year)}
 status: reference-placeholder
 ---
 
@@ -87,10 +93,13 @@ status: reference-placeholder
 This placeholder was created from a citation. Ingest the paper to replace it with a full paper note.
 
 - **DOI:** {_doi_display(doi or "")}
+- **Year:** [[{year}]]
+- **Cited by:** [[{citing_paper_id}]]
 - **Citation as extracted:** {raw}
 '''
     atomic_write_text(path, content)
     return path
+
 
 
 def _obsidian_link(vault: Path, target: str | Path) -> str:

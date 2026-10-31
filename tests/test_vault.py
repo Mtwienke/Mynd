@@ -73,8 +73,8 @@ def test_write_paper_note_preserves_human_sections(tmp_path):
 def test_write_reference_placeholder_is_idempotent(tmp_path):
     vault = tmp_path / "vault"
     citation = {"raw_reference": "Ref", "doi": "10.1234/ref"}
-    first = write_reference_placeholder(vault, citation)
-    second = write_reference_placeholder(vault, citation)
+    first = write_reference_placeholder(vault, citation, "citing-id")
+    second = write_reference_placeholder(vault, citation, "citing-id")
     assert first == second
     assert "reference-placeholder" in first.read_text(encoding="utf-8")
 
