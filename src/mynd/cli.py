@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+import httpx
 import typer
 
 from mynd.ai.runtime import RuntimeControl
@@ -87,5 +88,13 @@ def doctor(
     typer.echo(f"Inbox: {settings.inbox_path}")
     typer.echo(f"PDF store: {settings.pdf_store_path}")
     typer.echo(f"Database: {settings.database_path}")
-    typer.echo(f"GROBID enabled: {settings.use_grobid} ({settings.grobid_url})")
-    typer.echo("Directories are ready. GROBID connectivity is not checked by this command.")
+    grobid_status = "Disabled"
+    if settings.use_grobid:
+        try:
+            with httpx.Client() as client:
+                client.get(f"{settings.grobid_url.rstrip('/')}/api", timeout=2.0)
+            grobid_status = "Connected"
+        except (httpx.HTTPError, OSError) as exc:
+            grobid_status = f"Unavailable ({exc})"
+    typer.echo(f"GROBID enabled: {settings.use_grobid} ({settings.grobid_url}) - {grobid_status}")
+    typer.echo("Directories are ready.")
