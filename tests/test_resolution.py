@@ -133,6 +133,47 @@ def test_resolve_extracted_references_no_doi_is_unresolved():
     assert citations[0]["confidence"] == 0.0
 
 
+def test_resolve_extracted_references_propagates_grobid_metadata():
+    grobid = {
+        "title": "A cited paper",
+        "authors": ["Ada Lovelace"],
+        "year": 2023,
+        "venue": "Journal of Examples",
+    }
+    citations, errors = resolve_extracted_references(
+        [
+            {
+                "raw_reference": "Ada Lovelace. A cited paper. 2023.",
+                "title": "A cited paper",
+                "authors": ["Ada Lovelace"],
+                "year": 2023,
+                "venue": "Journal of Examples",
+                "volume": "12",
+                "issue": "3",
+                "pages": "10-20",
+                "publisher": "Example Press",
+                "url": "https://example.org/cited",
+                "grobid": grobid,
+            }
+        ],
+        lambda doi: None,
+        None,
+    )
+
+    assert errors == []
+    citation = citations[0]
+    assert citation["title"] == "A cited paper"
+    assert citation["authors"] == ["Ada Lovelace"]
+    assert citation["year"] == 2023
+    assert citation["venue"] == "Journal of Examples"
+    assert citation["volume"] == "12"
+    assert citation["issue"] == "3"
+    assert citation["pages"] == "10-20"
+    assert citation["publisher"] == "Example Press"
+    assert citation["url"] == "https://example.org/cited"
+    assert citation["grobid"] == grobid
+
+
 def test_resolve_extracted_references_records_http_errors():
     crossref = MagicMock()
     crossref.by_doi.side_effect = httpx.HTTPError("boom")

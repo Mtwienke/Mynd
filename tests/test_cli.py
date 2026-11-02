@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 from typer.testing import CliRunner
 
-from mynd.cli import app
+from mynd.cli import _grobid_health_url, _wait_for_grobid, app
 from mynd.settings import Settings
 
 runner = CliRunner()
@@ -106,3 +106,25 @@ def test_settings_from_reports_missing_required_keys(tmp_path):
 
     assert result.exit_code != 0
     assert "database_path" in result.output
+
+
+def test_grobid_health_url_uses_isalive_endpoint():
+    assert (
+        _grobid_health_url("http://localhost:8070/")
+        == "http://localhost:8070/api/isalive"
+    )
+
+
+def test_wait_for_grobid_polls_health_endpoint():
+    response = MagicMock()
+    response.raise_for_status.return_value = None
+    client = MagicMock()
+    client.__enter__.return_value = client
+    client.get.return_value = response
+
+    with patch("mynd.cli.httpx.Client", return_value=client):
+        assert _wait_for_grobid("http://localhost:8070", timeout=0.1, interval=0)
+
+    client.get.assert_called_once_with(
+        "http://localhost:8070/api/isalive", timeout=2.0
+    )

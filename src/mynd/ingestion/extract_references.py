@@ -71,7 +71,7 @@ def _reference_from_bibl_struct(node: XmlNode) -> ReferenceRecord:
         "doi": doi,
         "identifiers": identifiers,
         "raw_reference": _text(node) or "",
-        "tei": ET.tostring(node, encoding="unicode"),
+        "tei": ET.tostring(node, encoding="unicode").replace("ns0:", "tei:"),
     }
     return {
         "raw_reference": grobid["raw_reference"],

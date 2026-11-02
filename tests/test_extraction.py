@@ -104,6 +104,7 @@ def test_extract_grobid_references_parses_tei(tmp_path):
     }
     assert "A cited paper" in first["grobid"]["tei"]
     assert "biblStruct" in first["grobid"]["tei"]
+    assert "ns0:" not in first["grobid"]["tei"]
     assert references[1]["doi"] is None
     assert references[1]["title"] == "No DOI reference"
     assert post.call_args.kwargs["timeout"] == 90.0
