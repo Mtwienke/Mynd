@@ -372,7 +372,9 @@ def _render_paper_note(
     summary: str | None,
     human_sections: dict[str, str],
 ) -> str:
-    summary_content = _sanitize_block(summary or _SUMMARY_FALLBACK)
+    summary_content = _sanitize_block(
+        summary or human_sections.get("Summary") or _SUMMARY_FALLBACK
+    )
     abstract = _sanitize_block(metadata.get('abstract') or '_No abstract retrieved._')
     return f"""---
 type: paper

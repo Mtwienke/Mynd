@@ -70,6 +70,19 @@ def test_write_paper_note_preserves_human_sections(tmp_path):
     assert "Second" in updated
 
 
+def test_write_paper_note_keeps_existing_summary_without_new_one(tmp_path):
+    pdf = tmp_path / "paper.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    metadata = {"title": "A Study", "authors": [], "doi": None, "year": None}
+    vault = tmp_path / "vault"
+    path = write_paper_note(PaperNote(vault, "paper-abcdef123456", metadata, pdf, summary="First"))
+
+    write_paper_note(PaperNote(vault, "paper-abcdef123456", metadata, pdf, summary=None))
+    updated = path.read_text(encoding="utf-8")
+    assert "First" in updated
+    assert "_Summary unavailable" not in updated
+
+
 def _citation_with_grobid() -> dict:
     grobid = {
         "title": "A cited paper",
