@@ -1,4 +1,5 @@
-# Replace vault_path with the absolute path to your Obsidian vault.
+# vault_path is the Obsidian vault; data_path is Mynd's runtime data directory
+# (mode file, extracted text, SQLite). They are deliberately separate.
 vault_path = "./Obsidian/MyndVault"
 data_path = "./vault"
 inbox_path = "./vault/00 Inbox"
@@ -12,3 +13,7 @@ use_grobid = true
 
 # Contact email is polite for Crossref API use. Replace with your email.
 crossref_email = "you@example.com"
+
+# PDFs are only sent to a loopback GROBID host by default. Set this to true
+# only if you intentionally run GROBID on another machine.
+allow_remote_services = false

@@ -3,3 +3,10 @@
 __pycache__/
 *.py[cod]
 .DS_Store
+.desloppify/
+.agents/
+
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+.agents/
