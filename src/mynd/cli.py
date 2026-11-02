@@ -7,8 +7,11 @@ from pathlib import Path
 import httpx
 import typer
 
+from mynd.ai.models import build_text_generator
 from mynd.ai.runtime import RuntimeControl
 from mynd.core import ingest_inbox
+from mynd.questionnize import QuestionWriter
+from mynd.questionnize.service import questionnize_note, resolve_note_path
 from mynd.resolution.crossref import CrossrefClient
 from mynd.settings import Settings, load_settings
 from mynd.vault.review_queue import write_review_queue
@@ -94,6 +97,39 @@ def review_queue(
     settings = settings_from(config)
     path = write_review_queue(settings)
     typer.echo(str(path))
+
+
+@app.command()
+def questionnize(
+    target: str = typer.Argument(..., help="Paper note path, paper ID, or DOI"),
+    config: Path = typer.Option(Path("config.toml"), "--config", "-c"),
+) -> None:
+    """Generate ten study questions from an ingested paper's summary."""
+    settings = settings_from(config)
+    try:
+        note_path = resolve_note_path(settings, target)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+    generator = build_text_generator(
+        runtime_control=RuntimeControl(settings.mode_file),
+        progress=lambda message: typer.echo(message, err=True),
+    )
+    try:
+        if not generator.ensure_model():
+            typer.echo(f"Model {generator.model} is unavailable.", err=True)
+            raise typer.Exit(code=1)
+        questions = questionnize_note(
+            note_path,
+            QuestionWriter(generator),
+            progress=lambda message: typer.echo(message, err=True),
+        )
+    except (OSError, ValueError) as exc:
+        typer.echo(f"Could not generate questions: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    finally:
+        generator.close()
+    typer.echo(f"Wrote {questions.total} questions to {note_path}")
 
 
 @app.command()

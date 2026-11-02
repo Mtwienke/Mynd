@@ -61,6 +61,16 @@ def test_paper_for_doi_round_trips(database):
     assert found.note_path == "/vault/note.md"
 
 
+def test_paper_for_id_round_trips(database):
+    _save(database)
+    repositories.set_paper_note_path(database, "doi-abc", Path("/vault/note.md"))
+
+    found = repositories.paper_for_id(database, "doi-abc")
+    assert found is not None
+    assert found.id == "doi-abc"
+    assert found.note_path == "/vault/note.md"
+
+
 def test_resolved_citations_are_joined_with_target_note(database):
     _save(database, paper_id="source", doi="10.1000/source")
     _save(database, paper_id="target", doi="10.1000/target")

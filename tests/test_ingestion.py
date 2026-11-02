@@ -7,6 +7,7 @@ import httpx
 import pytest
 
 from mynd.core import ingest_inbox, ingest_pdf
+from mynd.questionnize import QuestionGenerationError, QuestionSet
 from mynd.settings import load_settings
 from mynd.storage.database import initialize_database
 
@@ -200,3 +201,106 @@ def test_ingest_pdf_refuses_non_local_grobid_egress(mock_settings, sample_pdf):
 
     assert result["references_error"] is not None
     assert result["status"] == "ingested"
+
+
+def _questions() -> QuestionSet:
+    return QuestionSet(
+        main_idea=(
+            QuestionAnswer("One?", "Ans 1"),
+            QuestionAnswer("Two?", "Ans 2"),
+            QuestionAnswer("Three?", "Ans 3"),
+        ),
+        methodology=(
+            QuestionAnswer("One?", "Ans 1"),
+            QuestionAnswer("Two?", "Ans 2"),
+            QuestionAnswer("Three?", "Ans 3"),
+            QuestionAnswer("Four?", "Ans 4"),
+        ),
+        findings=(
+            QuestionAnswer("One?", "Ans 1"),
+            QuestionAnswer("Two?", "Ans 2"),
+            QuestionAnswer("Three?", "Ans 3"),
+        ),
+    )
+
+
+def test_ingest_pdf_adds_questions_after_generating_a_summary(mock_settings, sample_pdf):
+    summarizer = MagicMock()
+    summarizer.summarize.return_value = "A short summary."
+    summarizer.annotate_references.side_effect = lambda text, citations, metadata: citations
+    questionnizer = MagicMock()
+    questionnizer.generate.return_value = _questions()
+
+    with (
+        patch("mynd.core.extract_text_and_doi", return_value=("Body text", "10.1234/x")),
+        patch("mynd.core.write_paper_note", return_value=Path("note.md")) as write_note,
+        patch("mynd.core.sha256_file", return_value="digest-questions"),
+        patch("mynd.core.repositories.paper_for_doi", return_value=None),
+    ):
+        result = ingest_pdf(
+            sample_pdf,
+            mock_settings,
+            summarizer=summarizer,
+            questionnizer=questionnizer,
+        )
+
+    questionnizer.generate.assert_called_once()
+    note = write_note.call_args.args[0]
+    assert note.questions is not None
+    assert "### Main idea" in note.questions
+    assert "questions_error" not in result
+
+
+def test_ingest_pdf_does_not_regenerate_questions_on_refresh(mock_settings, sample_pdf):
+    questionnizer = MagicMock()
+    questionnizer.generate.return_value = _questions()
+    summarizer = MagicMock()
+    summarizer.summarize.return_value = "A short summary."
+    summarizer.annotate_references.side_effect = lambda text, citations, metadata: citations
+
+    with (
+        patch("mynd.core.extract_text_and_doi", return_value=("Body text", "10.1234/x")),
+        patch("mynd.core.write_paper_note", return_value=Path("note.md")),
+        patch("mynd.core.sha256_file", return_value="digest-refresh-questions"),
+        patch("mynd.core.repositories.paper_for_doi", return_value=None),
+    ):
+        ingest_pdf(
+            sample_pdf,
+            mock_settings,
+            summarizer=summarizer,
+            questionnizer=questionnizer,
+        )
+        result = ingest_pdf(
+            sample_pdf,
+            mock_settings,
+            summarizer=summarizer,
+            questionnizer=questionnizer,
+        )
+
+    assert result["status"] == "already_ingested"
+    questionnizer.generate.assert_called_once()
+
+
+def test_ingest_pdf_continues_when_question_generation_fails(mock_settings, sample_pdf):
+    summarizer = MagicMock()
+    summarizer.summarize.return_value = "A short summary."
+    summarizer.annotate_references.side_effect = lambda text, citations, metadata: citations
+    questionnizer = MagicMock()
+    questionnizer.generate.side_effect = QuestionGenerationError("bad JSON")
+
+    with (
+        patch("mynd.core.extract_text_and_doi", return_value=("Body text", "10.1234/x")),
+        patch("mynd.core.write_paper_note", return_value=Path("note.md")) as write_note,
+        patch("mynd.core.sha256_file", return_value="digest-bad-questions"),
+        patch("mynd.core.repositories.paper_for_doi", return_value=None),
+    ):
+        result = ingest_pdf(
+            sample_pdf,
+            mock_settings,
+            summarizer=summarizer,
+            questionnizer=questionnizer,
+        )
+
+    assert result["status"] == "ingested"
+    assert result["questions_error"] == "bad JSON"
+    assert write_note.call_args.args[0].questions is None

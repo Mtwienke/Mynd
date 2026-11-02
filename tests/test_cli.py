@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 from typer.testing import CliRunner
 
 from mynd.cli import _grobid_health_url, _wait_for_grobid, app
+from mynd.questionnize import QuestionSet
 from mynd.settings import Settings
 
 runner = CliRunner()
@@ -86,6 +87,69 @@ def test_review_queue_command_prints_path(tmp_path, config_file):
         result = runner.invoke(app, ["review-queue", "--config", str(config_file)])
     assert result.exit_code == 0
     assert str(expected) in result.output
+
+
+def _questions() -> QuestionSet:
+    return QuestionSet(
+        main_idea=(
+            QuestionAnswer("One?", "Ans 1"),
+            QuestionAnswer("Two?", "Ans 2"),
+            QuestionAnswer("Three?", "Ans 3"),
+        ),
+        methodology=(
+            QuestionAnswer("One?", "Ans 1"),
+            QuestionAnswer("Two?", "Ans 2"),
+            QuestionAnswer("Three?", "Ans 3"),
+            QuestionAnswer("Four?", "Ans 4"),
+        ),
+        findings=(
+            QuestionAnswer("One?", "Ans 1"),
+            QuestionAnswer("Two?", "Ans 2"),
+            QuestionAnswer("Three?", "Ans 3"),
+        ),
+    )
+
+
+def test_questionnize_command_writes_questions(tmp_path, config_file):
+    settings = _settings(tmp_path)
+    note = tmp_path / "vault" / "10 Papers" / "Paper.md"
+    note.parent.mkdir(parents=True)
+    note.write_text("## Summary\n\nA summary.\n", encoding="utf-8")
+    generator = MagicMock()
+    generator.ensure_model.return_value = True
+    generator.model = "fake-model"
+    with (
+        patch("mynd.cli.load_settings", return_value=settings),
+        patch("mynd.cli.build_text_generator", return_value=generator),
+        patch("mynd.cli.questionnize_note", return_value=_questions()),
+    ):
+        result = runner.invoke(
+            app, ["questionnize", str(note), "--config", str(config_file)]
+        )
+
+    assert result.exit_code == 0
+    assert "Wrote 10 questions" in result.output
+    generator.close.assert_called_once()
+
+
+def test_questionnize_command_reports_missing_model(tmp_path, config_file):
+    settings = _settings(tmp_path)
+    note = tmp_path / "note.md"
+    note.write_text("## Summary\n\nA summary.\n", encoding="utf-8")
+    generator = MagicMock()
+    generator.ensure_model.return_value = False
+    generator.model = "fake-model"
+    with (
+        patch("mynd.cli.load_settings", return_value=settings),
+        patch("mynd.cli.build_text_generator", return_value=generator),
+    ):
+        result = runner.invoke(
+            app, ["questionnize", str(note), "--config", str(config_file)]
+        )
+
+    assert result.exit_code == 1
+    assert "unavailable" in result.output
+    generator.close.assert_called_once()
 
 
 def test_settings_from_reports_malformed_config(tmp_path):

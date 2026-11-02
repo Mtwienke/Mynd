@@ -25,6 +25,7 @@ from mynd.identity import doi_work_id, file_work_id
 from mynd.ingestion.extract_references import extract_grobid_references
 from mynd.ingestion.extract_text import extract_text_and_doi
 from mynd.ingestion.text import save_extracted_text, text_without_references
+from mynd.questionnize import QuestionWriter
 from mynd.resolution.citations import resolve_extracted_references
 from mynd.resolution.crossref import CrossrefClient, metadata_from_crossref
 from mynd.settings import Settings
@@ -64,6 +65,7 @@ def ingest_pdf(
     crossref: CrossrefClient | None = None,
     progress: Callable[[str], None] | None = None,
     summarizer: SummaryWriter | None = None,
+    questionnizer: QuestionWriter | None = None,
 ) -> IngestionSuccess:
     """Ingest or refresh one PDF; the caller must have initialized the schema."""
     progress = progress or (lambda _message: None)
@@ -79,7 +81,9 @@ def ingest_pdf(
         prepared = _prepare_refresh(pdf_path, settings, existing, stored_pdf, progress)
     else:
         prepared = _prepare_new(pdf_path, settings, crossref, digest, stored_pdf, progress)
-    return _finalize_ingestion(settings, crossref, summarizer, progress, prepared)
+    return _finalize_ingestion(
+        settings, crossref, summarizer, questionnizer, progress, prepared
+    )
 
 
 def _prepare_refresh(
@@ -194,6 +198,7 @@ def _finalize_ingestion(
     settings: Settings,
     crossref: CrossrefClient | None,
     summarizer: SummaryWriter | None,
+    questionnizer: QuestionWriter | None,
     progress: Callable[[str], None],
     prepared: _PreparedDocument,
 ) -> IngestionSuccess:
@@ -216,6 +221,18 @@ def _finalize_ingestion(
         citations = summarizer.annotate_references(summary_text, citations, prepared.metadata)
         progress("Summary generated")
 
+    questions = None
+    questions_error = None
+    if questionnizer and summary and not prepared.is_refresh:
+        try:
+            questions = questionnizer.generate(
+                summary, prepared.metadata, progress=progress
+            ).to_markdown()
+            progress("Extracted questions generated")
+        except ValueError as exc:
+            questions_error = str(exc)
+            progress(f"Skipping extracted questions: {exc}")
+
     citing_title = prepared.metadata.get("title") or prepared.source_pdf.stem
     for citation in citations:
         if not citation.get("target_note"):
@@ -235,6 +252,7 @@ def _finalize_ingestion(
             source_pdf=prepared.source_pdf,
             citations=citations,
             summary=summary,
+            questions=questions,
         )
     )
     repositories.set_paper_note_path(settings.database_path, prepared.paper_id, note)
@@ -254,6 +272,8 @@ def _finalize_ingestion(
         result["references_error"] = references_error
     if citation_errors:
         result["citation_errors"] = citation_errors
+    if questions_error:
+        result["questions_error"] = questions_error
     return result
 
 
@@ -313,8 +333,8 @@ def _stderr_progress(message: str) -> None:
 
 def _prepare_runtime(
     settings: Settings, progress: Callable[[str], None], verbose: bool
-) -> tuple[RuntimeControl, SummaryWriter | None]:
-    """Start runtime control and resolve the summarizer for this batch."""
+) -> tuple[RuntimeControl, SummaryWriter | None, QuestionWriter | None]:
+    """Start runtime control and resolve the model-backed writers for this batch."""
     runtime_control = RuntimeControl(settings.mode_file)
     progress(f"Inference mode: {runtime_control.mode()}")
     if not MacThermalMonitor.supported():
@@ -335,9 +355,9 @@ def _prepare_runtime(
         progress(
             f"Model {generator.model} is unavailable; continuing ingestion without summarization"
         )
-        return runtime_control, None
+        return runtime_control, None, None
     progress(f"Summarization model ready: {generator.model}")
-    return runtime_control, SummaryWriter(generator)
+    return runtime_control, SummaryWriter(generator), QuestionWriter(generator)
 
 
 def _ingest_batch(
@@ -345,6 +365,7 @@ def _ingest_batch(
     settings: Settings,
     crossref: CrossrefClient | None,
     summarizer: SummaryWriter | None,
+    questionnizer: QuestionWriter | None,
     progress: Callable[[str], None],
     runtime_control: RuntimeControl,
     verbose: bool,
@@ -356,7 +377,12 @@ def _ingest_batch(
         progress(f"{progress_label}: {pdf.name}")
         try:
             result: IngestionResult = ingest_pdf(
-                pdf, settings, crossref, progress=progress, summarizer=summarizer
+                pdf,
+                settings,
+                crossref,
+                progress=progress,
+                summarizer=summarizer,
+                questionnizer=questionnizer,
             )
             progress(f"Finished {progress_label}: {pdf.name} ({result['status']})")
         except Exception as exc:  # noqa: BLE001 - isolate failures per document
@@ -403,11 +429,20 @@ def ingest_inbox(
     if not pdfs:
         return []
 
-    runtime_control, summarizer = _prepare_runtime(settings, notify, verbose)
+    runtime_control, summarizer, questionnizer = _prepare_runtime(settings, notify, verbose)
     try:
         return _ingest_batch(
-            pdfs, settings, crossref, summarizer, notify, runtime_control, verbose
+            pdfs,
+            settings,
+            crossref,
+            summarizer,
+            questionnizer,
+            notify,
+            runtime_control,
+            verbose,
         )
     finally:
         if summarizer is not None:
             summarizer.generator.close()
+        elif questionnizer is not None:
+            questionnizer.generator.close()

@@ -16,10 +16,17 @@ from mynd.identity import (
 )
 from mynd.resolution.doi import normalize_doi
 
-_SECTION_HEADINGS = ("Summary", "My notes", "Questions", "Reading log")
+_SECTION_HEADINGS = (
+    "Summary",
+    "Extracted questions",
+    "My notes",
+    "Questions",
+    "Reading log",
+)
 _DOI_LINK = "[doi:{doi}](https://doi.org/{doi})"
 _SUMMARY_FALLBACK = "_Summary unavailable. Check model availability and retry ingestion._"
 _NO_REFERENCES = "_No references extracted yet._"
+_NO_EXTRACTED_QUESTIONS = "_No extracted questions yet._"
 _DEFAULT_NOTES = (
     "_Add your own interpretation here. This section is preserved during note updates._"
 )
@@ -83,6 +90,7 @@ class PaperNote:
     source_pdf: Path
     citations: list[CitationRecord] = field(default_factory=list)
     summary: str | None = None
+    questions: str | None = None
 
 
 def write_reference_placeholder(
@@ -394,10 +402,16 @@ def _render_paper_note(
     source_pdf: Path,
     citations: list[CitationRecord],
     summary: str | None,
+    questions: str | None,
     human_sections: dict[str, str],
 ) -> str:
     summary_content = _sanitize_block(
         summary or human_sections.get("Summary") or _SUMMARY_FALLBACK
+    )
+    questions_content = (
+        questions
+        or human_sections.get("Extracted questions")
+        or _NO_EXTRACTED_QUESTIONS
     )
     abstract = _sanitize_block(metadata.get('abstract') or '_No abstract retrieved._')
     return f"""---
@@ -415,6 +429,10 @@ status: inbox
 ## Summary
 
 {summary_content}
+
+## Extracted questions
+
+{questions_content}
 
 ## Abstract
 
@@ -460,6 +478,7 @@ def write_paper_note(note: PaperNote) -> Path:
         source_pdf=note.source_pdf,
         citations=note.citations,
         summary=note.summary or human_sections.get("Summary"),
+        questions=note.questions,
         human_sections=human_sections,
     )
     atomic_write_text(path, content)
