@@ -205,9 +205,22 @@ def test_ingest_pdf_refuses_non_local_grobid_egress(mock_settings, sample_pdf):
 
 def _questions() -> QuestionSet:
     return QuestionSet(
-        main_idea=("One?", "Two?", "Three?"),
-        methodology=("One?", "Two?", "Three?", "Four?"),
-        findings=("One?", "Two?", "Three?"),
+        main_idea=(
+            QuestionAnswer("One?", "Ans 1"),
+            QuestionAnswer("Two?", "Ans 2"),
+            QuestionAnswer("Three?", "Ans 3"),
+        ),
+        methodology=(
+            QuestionAnswer("One?", "Ans 1"),
+            QuestionAnswer("Two?", "Ans 2"),
+            QuestionAnswer("Three?", "Ans 3"),
+            QuestionAnswer("Four?", "Ans 4"),
+        ),
+        findings=(
+            QuestionAnswer("One?", "Ans 1"),
+            QuestionAnswer("Two?", "Ans 2"),
+            QuestionAnswer("Three?", "Ans 3"),
+        ),
     )
 
 

@@ -3,7 +3,12 @@ from pathlib import Path
 
 import pytest
 
-from mynd.questionnize import QuestionGenerationError, QuestionSet, QuestionWriter
+from mynd.questionnize import (
+    QuestionAnswer,
+    QuestionGenerationError,
+    QuestionSet,
+    QuestionWriter,
+)
 from mynd.questionnize.note import (
     EXTRACTED_QUESTIONS_HEADING,
     questionnize_note,
@@ -21,9 +26,27 @@ SUMMARY = "The paper studies local-first research workflows and reports faster r
 
 def _payload():
     return {
-        "main_idea": [f"Main question {index}?" for index in range(1, 4)],
-        "methodology": [f"Method question {index}?" for index in range(1, 5)],
-        "findings": [f"Finding question {index}?" for index in range(1, 4)],
+        "main_idea": [
+            {
+                "question": f"Main question {index}?",
+                "answer": f"Main answer {index}.",
+            }
+            for index in range(1, 4)
+        ],
+        "methodology": [
+            {
+                "question": f"Method question {index}?",
+                "answer": f"Method answer {index}.",
+            }
+            for index in range(1, 5)
+        ],
+        "findings": [
+            {
+                "question": f"Finding question {index}?",
+                "answer": f"Finding answer {index}.",
+            }
+            for index in range(1, 4)
+        ],
     }
 
 
@@ -50,20 +73,22 @@ class FakeQuestionWriter:
 def _questions() -> QuestionSet:
     return QuestionSet(
         main_idea=(
-            "What problem does the paper address?",
-            "What is the central claim?",
-            "Why does it matter?",
+            QuestionAnswer(
+                "What problem does the paper address?", "It addresses slow recall."
+            ),
+            QuestionAnswer("What is the central claim?", "Local-first notes improve recall."),
+            QuestionAnswer("Why does it matter?", "It affects research workflows."),
         ),
         methodology=(
-            "How was the study designed?",
-            "What data were used?",
-            "How were measures defined?",
-            "How was the analysis performed?",
+            QuestionAnswer("How was the study designed?", "A controlled comparison."),
+            QuestionAnswer("What data were used?", "Notes from twelve researchers."),
+            QuestionAnswer("How were measures defined?", "Recall and completion time."),
+            QuestionAnswer("How was the analysis performed?", "A paired analysis."),
         ),
         findings=(
-            "What was the main result?",
-            "Which evidence supports it?",
-            "What conclusion follows?",
+            QuestionAnswer("What was the main result?", "Recall improved."),
+            QuestionAnswer("Which evidence supports it?", "The comparison found a gain."),
+            QuestionAnswer("What conclusion follows?", "Local-first notes help."),
         ),
     )
 
@@ -79,20 +104,23 @@ def test_generate_returns_grouped_questions_and_renders_markdown():
         progress=progress.append,
     )
 
-    assert questions.main_idea[0] == "Main question 1?"
+    assert questions.main_idea[0].question == "Main question 1?"
+    assert questions.main_idea[0].answer == "Main answer 1."
     assert len(questions.methodology) == 4
     assert questions.total == 10
     assert "A Paper" in generator.prompts[0]
     assert SUMMARY in generator.prompts[0]
     assert "exactly 10 questions" in generator.prompts[0]
-    assert progress[0] == "Generating 10 questions from summary"
-    assert progress[-1] == "Generated 10 questions"
+    assert "concise answer" in generator.prompts[0]
+    assert progress[0] == "Generating 10 questions and answers from summary"
+    assert progress[-1] == "Generated 10 questions with answers"
 
     markdown = questions.to_markdown()
     assert "### Main idea" in markdown
     assert "### Methodology" in markdown
     assert "### Findings" in markdown
     assert markdown.count("\n1. ") == 3
+    assert "**Answer:** Main answer 1." in markdown
 
 
 def test_generate_tolerates_surrounding_model_prose():
