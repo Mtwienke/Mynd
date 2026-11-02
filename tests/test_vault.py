@@ -41,12 +41,21 @@ def test_write_paper_note_creates_note_with_sections(tmp_path):
         "abstract": "An abstract.",
     }
     path = write_paper_note(
-        PaperNote(tmp_path / "vault", "paper-abcdef123456", metadata, pdf, summary="My summary")
+        PaperNote(
+            tmp_path / "vault",
+            "paper-abcdef123456",
+            metadata,
+            pdf,
+            summary="My summary",
+            questions="### Main idea\n\n1. What is it?",
+        )
     )
     content = path.read_text(encoding="utf-8")
     assert "# A Study" in content
     assert "Ada Lovelace" in content
     assert "My summary" in content
+    assert "## Extracted questions" in content
+    assert "### Main idea" in content
     assert "## Provenance" in content
 
 
@@ -81,6 +90,28 @@ def test_write_paper_note_keeps_existing_summary_without_new_one(tmp_path):
     updated = path.read_text(encoding="utf-8")
     assert "First" in updated
     assert "_Summary unavailable" not in updated
+
+
+def test_write_paper_note_preserves_existing_extracted_questions(tmp_path):
+    pdf = tmp_path / "paper.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    metadata = {"title": "A Study", "authors": [], "doi": None, "year": None}
+    vault = tmp_path / "vault"
+    path = write_paper_note(
+        PaperNote(
+            vault,
+            "paper-abcdef123456",
+            metadata,
+            pdf,
+            summary="First",
+            questions="### Main idea\n\n1. Original question?",
+        )
+    )
+
+    write_paper_note(PaperNote(vault, "paper-abcdef123456", metadata, pdf, summary="Second"))
+    updated = path.read_text(encoding="utf-8")
+    assert "Original question?" in updated
+    assert updated.count("## Extracted questions") == 1
 
 
 def _citation_with_grobid() -> dict:

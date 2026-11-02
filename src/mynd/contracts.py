@@ -96,6 +96,7 @@ class IngestionSuccess(TypedDict):
     metadata_error: NotRequired[str]
     references_error: NotRequired[str]
     citation_errors: NotRequired[list[str]]
+    questions_error: NotRequired[str]
 
 
 class IngestionFailure(TypedDict):

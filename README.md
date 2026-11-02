@@ -17,6 +17,7 @@ The installable code lives under `src/` and is split by responsibility:
 | `mynd.storage` | SQLite schema and row-level persistence helpers |
 | `mynd.vault` | Obsidian note rendering and citation linking |
 | `mynd.ai` | Local Ollama backend, runtime controls, and summarization |
+| `mynd.questionnize` | Study questions generated from a paper's summary |
 
 Every domain package is nested under the `mynd` distribution package, so a
 normal install exposes only `mynd` as a top-level import.
@@ -62,6 +63,17 @@ mynd review-queue
 
 Open the configured vault in Obsidian. Notes are written under `10 Papers/`.
 
+When a model is available, ingesting a new paper also writes an **Extracted
+questions** chapter: three questions about the main idea, four about the
+methodology, and three about specific findings. To regenerate those questions
+for an already ingested paper, pass its note path, paper ID, or DOI:
+
+```bash
+mynd questionnize "Obsidian/MyndVault/10 Papers/A Study (abcdef123456).md"
+mynd questionnize doi-abcdef123456
+mynd questionnize 10.1234/study
+```
+
 ## Inference modes and thermal response
 
 Choose a reduced-resource profile when starting ingestion:
@@ -96,7 +108,11 @@ Keep that process running, then ingest PDFs. If GROBID is unavailable, the PDF a
 - The prototype finds a DOI in extracted PDF text and enriches metadata via Crossref.
 - Citation extraction requires GROBID; reference resolution is strongest when a DOI is present.
 - References to papers not yet in the vault are marked `external`, not automatically downloaded.
-- When the configured model is available, ingestion creates an AI summary and tentative reference annotations. If it is unavailable, ingestion continues and the note records that no summary was generated. Quizzes are not implemented.
+- When the configured model is available, ingestion creates an AI summary,
+  tentative reference annotations, and ten extracted study questions. If it is
+  unavailable, ingestion continues and the note records that no summary was
+  generated. Questions are based only on the generated summary, not the full
+  paper text.
 - Scanned PDFs may require OCR.
 - PDF processing and API responses should be tested against your own paper collection before relying on the generated graph.
 

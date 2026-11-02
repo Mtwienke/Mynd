@@ -218,6 +218,15 @@ def paper_for_doi(database_path: Path, doi: str) -> PaperLocation | None:
     return PaperLocation(*row) if row else None
 
 
+def paper_for_id(database_path: Path, paper_id: str) -> PaperLocation | None:
+    """Return the paper id and note path stored for a work ID."""
+    with connect(database_path) as db:
+        row = db.execute(
+            "SELECT id, note_path FROM papers WHERE id=?", (paper_id,)
+        ).fetchone()
+    return PaperLocation(*row) if row else None
+
+
 def save_ingestion(
     database_path: Path,
     paper_id: str,
