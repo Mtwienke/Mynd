@@ -85,6 +85,51 @@ def test_resolved_citations_are_joined_with_target_note(database):
     assert citations[0]["target_note"] == "/vault/target.md"
 
 
+def test_citations_round_trip_grobid_payload(database):
+    _save(database, paper_id="source")
+    grobid = {
+        "title": "A cited paper",
+        "authors": ["Ada Lovelace"],
+        "year": 2023,
+        "venue": "Journal of Examples",
+        "raw_reference": "Target work",
+        "tei": "<tei:biblStruct/>",
+    }
+    repositories.insert_resolved_citations(
+        database,
+        "source",
+        [
+            {
+                "raw_reference": "Target work",
+                "doi": "10.1000/target",
+                "status": "unresolved",
+                "grobid": grobid,
+            }
+        ],
+    )
+
+    citations = repositories.citations_for_paper(database, "source")
+    assert citations[0]["grobid"] == grobid
+    assert citations[0]["title"] == "A cited paper"
+    assert citations[0]["authors"] == ["Ada Lovelace"]
+    assert citations[0]["year"] == 2023
+
+
+def test_insert_resolved_citations_refreshes_grobid_payload(database):
+    _save(database, paper_id="source")
+    citation = {"raw_reference": "Target work", "status": "unresolved"}
+    repositories.insert_resolved_citations(
+        database, "source", [{**citation, "grobid": {"title": "Old title"}}]
+    )
+    repositories.insert_resolved_citations(
+        database, "source", [{**citation, "grobid": {"title": "New title"}}]
+    )
+
+    citations = repositories.citations_for_paper(database, "source")
+    assert len(citations) == 1
+    assert citations[0]["grobid"]["title"] == "New title"
+
+
 def test_unresolved_citations_include_source_title(database):
     _save(database, paper_id="source", doi="10.1000/source", title="Source Paper")
     repositories.insert_resolved_citations(

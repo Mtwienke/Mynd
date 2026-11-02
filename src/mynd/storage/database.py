@@ -47,6 +47,7 @@ def initialize_database(path: Path) -> None:
                 status TEXT NOT NULL DEFAULT 'unresolved',
                 confidence REAL NOT NULL DEFAULT 0,
                 evidence TEXT,
+                grobid_json TEXT NOT NULL DEFAULT '{}',
                 FOREIGN KEY(source_paper_id) REFERENCES papers(id),
                 FOREIGN KEY(target_paper_id) REFERENCES papers(id),
                 UNIQUE(source_paper_id, raw_reference)
@@ -60,4 +61,16 @@ def initialize_database(path: Path) -> None:
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
             """
+        )
+        _ensure_citation_columns(db)
+
+
+def _ensure_citation_columns(connection: sqlite3.Connection) -> None:
+    """Add columns introduced after a library database was first created."""
+    columns = {
+        row[1] for row in connection.execute("PRAGMA table_info(citations)").fetchall()
+    }
+    if "grobid_json" not in columns:
+        connection.execute(
+            "ALTER TABLE citations ADD COLUMN grobid_json TEXT NOT NULL DEFAULT '{}'"
         )

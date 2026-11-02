@@ -1,5 +1,7 @@
 import json
+import shutil
 import subprocess
+import time
 from pathlib import Path
 
 import httpx
@@ -12,6 +14,23 @@ from mynd.settings import Settings, load_settings
 from mynd.vault.review_queue import write_review_queue
 
 app = typer.Typer(help="Local-first research library for Obsidian.")
+
+
+def _grobid_health_url(url: str) -> str:
+    return f"{url.rstrip('/')}/api/isalive"
+
+
+def _wait_for_grobid(url: str, timeout: float = 60.0, interval: float = 1.0) -> bool:
+    """Poll GROBID until its health endpoint answers or the window expires."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            with httpx.Client() as client:
+                client.get(_grobid_health_url(url), timeout=2.0).raise_for_status()
+            return True
+        except (httpx.HTTPError, OSError):
+            time.sleep(interval)
+    return False
 
 
 def settings_from(config: Path) -> Settings:
@@ -91,18 +110,38 @@ def doctor(
     typer.echo(f"PDF store: {settings.pdf_store_path}")
     typer.echo(f"Database: {settings.database_path}")
     if start_grobid and settings.use_grobid:
-        typer.echo("Attempting to start GROBID via Docker...")
-        try:
-            subprocess.run(["docker", "run", "-d", "--rm", "-p", "8070:8070", "grobid/grobid:0.9.1-crf"], check=True)
-        except subprocess.CalledProcessError:
-            typer.echo("Error: Docker command failed. Please ensure Docker/OrbStack is running.")
-        import time
-        time.sleep(5)  # Give it a moment to spin up
+        docker = shutil.which("docker")
+        if docker is None:
+            typer.echo("Error: Docker is not installed or not on PATH.")
+        else:
+            typer.echo("Attempting to start GROBID via Docker...")
+            try:
+                subprocess.run(
+                    [
+                        docker,
+                        "run",
+                        "-d",
+                        "--rm",
+                        "-p",
+                        "8070:8070",
+                        "grobid/grobid:0.9.1-crf",
+                    ],
+                    check=True,
+                    timeout=30,
+                )
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+                typer.echo(
+                    "Error: Docker command failed. Please ensure Docker/OrbStack is running."
+                )
+            else:
+                typer.echo("Waiting for GROBID to become ready...")
+                if not _wait_for_grobid(settings.grobid_url):
+                    typer.echo("GROBID did not become ready within 60 seconds.")
     grobid_status = "Disabled"
     if settings.use_grobid:
         try:
             with httpx.Client() as client:
-                client.get(f"{settings.grobid_url.rstrip('/')}/api", timeout=2.0)
+                client.get(_grobid_health_url(settings.grobid_url), timeout=2.0)
             grobid_status = "Connected"
         except (httpx.HTTPError, OSError) as exc:
             grobid_status = f"Unavailable ({exc})"

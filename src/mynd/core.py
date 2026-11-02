@@ -216,10 +216,13 @@ def _finalize_ingestion(
         citations = summarizer.annotate_references(summary_text, citations, prepared.metadata)
         progress("Summary generated")
 
+    citing_title = prepared.metadata.get("title") or prepared.source_pdf.stem
     for citation in citations:
         if not citation.get("target_note"):
             citation["placeholder_note"] = str(
-                write_reference_placeholder(settings.vault_path, citation, prepared.metadata.get("title") or prepared.source_pdf.stem, prepared.paper_id)
+                write_reference_placeholder(
+                    settings.vault_path, citation, citing_title, prepared.paper_id
+                )
             )
     summary = link_summary_citations(settings.vault_path, summary, citations)
 

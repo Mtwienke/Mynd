@@ -70,6 +70,39 @@ def test_write_paper_note_preserves_human_sections(tmp_path):
     assert "Second" in updated
 
 
+def _citation_with_grobid() -> dict:
+    grobid = {
+        "title": "A cited paper",
+        "authors": ["Ada Lovelace", "Alan Turing"],
+        "year": 2023,
+        "venue": "Journal of Examples",
+        "volume": "12",
+        "issue": "3",
+        "pages": "10-20",
+        "publisher": "Example Press",
+        "url": "https://example.org/cited",
+        "doi": "10.1234/ref",
+        "identifiers": {"doi": "10.1234/ref", "arxiv": "2401.00001"},
+        "raw_reference": "Ada Lovelace. A cited paper. Journal of Examples, 12(3):10-20, 2023.",
+        "tei": "<tei:biblStruct><analytic><title>A cited paper</title></analytic></tei:biblStruct>",
+    }
+    return {
+        "raw_reference": grobid["raw_reference"],
+        "doi": grobid["doi"],
+        "title": grobid["title"],
+        "authors": grobid["authors"],
+        "year": grobid["year"],
+        "venue": grobid["venue"],
+        "volume": grobid["volume"],
+        "issue": grobid["issue"],
+        "pages": grobid["pages"],
+        "publisher": grobid["publisher"],
+        "url": grobid["url"],
+        "grobid": grobid,
+        "status": "unresolved",
+    }
+
+
 def test_write_reference_placeholder_is_idempotent(tmp_path):
     vault = tmp_path / "vault"
     citation = {"raw_reference": "Ref", "doi": "10.1234/ref"}
@@ -77,6 +110,56 @@ def test_write_reference_placeholder_is_idempotent(tmp_path):
     second = write_reference_placeholder(vault, citation, "Citing Paper", "citing-id")
     assert first == second
     assert "reference-placeholder" in first.read_text(encoding="utf-8")
+
+
+def test_write_reference_placeholder_saves_grobid_fields_and_dump(tmp_path):
+    vault = tmp_path / "vault"
+    path = write_reference_placeholder(
+        vault, _citation_with_grobid(), "Citing Paper", "citing-id"
+    )
+
+    content = path.read_text(encoding="utf-8")
+    assert "## GROBID Dump" in content
+    assert "year: 2023" in content
+    assert "[[2023]]" in content
+    assert '"arxiv": "2401.00001"' in content
+    assert "<tei:biblStruct>" in content
+    assert "- **Venue:** Journal of Examples" in content
+    assert "- **Volume:** 12" in content
+    assert "- **Issue:** 3" in content
+    assert "- **Pages:** 10-20" in content
+    assert "- **Publisher:** Example Press" in content
+    assert "- **URL:** https://example.org/cited" in content
+    assert '"status": "unresolved"' in content
+
+
+def test_write_reference_placeholder_accumulates_citations_and_keeps_notes(tmp_path):
+    vault = tmp_path / "vault"
+    citation = _citation_with_grobid()
+    path = write_reference_placeholder(vault, citation, "First Paper", "first-id")
+
+    content = path.read_text(encoding="utf-8").replace(
+        "_Add your own notes about this reference here._", "My private note."
+    )
+    path.write_text(content, encoding="utf-8")
+
+    write_reference_placeholder(vault, citation, "Second Paper", "second-id")
+    updated = path.read_text(encoding="utf-8")
+
+    assert "[[First Paper (first-id)]]" in updated
+    assert "[[Second Paper (second-id)]]" in updated
+    assert updated.count("[[First Paper (first-id)]]") == 2  # frontmatter and body
+    assert "My private note." in updated
+
+
+def test_write_reference_placeholder_falls_back_to_raw_year(tmp_path):
+    vault = tmp_path / "vault"
+    citation = {"raw_reference": "An older work (2021)", "doi": "10.1234/old"}
+    path = write_reference_placeholder(vault, citation, "Citing Paper", "citing-id")
+
+    content = path.read_text(encoding="utf-8")
+    assert "year: 2021" in content
+    assert "[[2021]]" in content
 
 
 def test_link_summary_citations_replaces_numbers(tmp_path):

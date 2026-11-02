@@ -18,12 +18,22 @@ from mynd.contracts import CitationRecord, PaperMetadata
 from mynd.storage.database import connect
 
 _INSERT_CITATION_SQL = """\
-INSERT OR IGNORE INTO citations
-(source_paper_id, target_paper_id, raw_reference, cited_doi, status, confidence, evidence)
-VALUES(?,?,?,?,?,?,?)"""
+INSERT INTO citations
+(source_paper_id, target_paper_id, raw_reference, cited_doi, status, confidence, evidence,
+ grobid_json)
+VALUES(?,?,?,?,?,?,?,?)
+ON CONFLICT(source_paper_id, raw_reference) DO UPDATE SET
+target_paper_id=excluded.target_paper_id,
+cited_doi=excluded.cited_doi,
+status=excluded.status,
+confidence=excluded.confidence,
+evidence=excluded.evidence,
+grobid_json=excluded.grobid_json"""
 
 _CITATIONS_FOR_PAPER_SQL = """\
-SELECT c.raw_reference, c.cited_doi AS doi, c.status, target.note_path AS target_note
+SELECT c.raw_reference, c.cited_doi AS doi, c.status, c.confidence, c.evidence,
+       c.target_paper_id AS target_id, c.grobid_json,
+       target.note_path AS target_note
 FROM citations c LEFT JOIN papers target ON target.id=c.target_paper_id
 WHERE c.source_paper_id=? ORDER BY c.id"""
 
@@ -51,6 +61,17 @@ WHERE c.status IN ('unresolved', 'ambiguous', 'external')
 ORDER BY p.title"""
 
 _METADATA_FIELDS = {"doi", "title", "year", "authors", "venue", "url", "abstract"}
+_REFERENCE_FIELDS = (
+    "title",
+    "authors",
+    "year",
+    "venue",
+    "volume",
+    "issue",
+    "pages",
+    "publisher",
+    "url",
+)
 EXTRACTION_EVIDENCE = "GROBID bibliography extraction"
 
 
@@ -98,7 +119,31 @@ def _citation_row(paper_id: str, citation: CitationRecord) -> tuple:
         citation.get("status", "unresolved"),
         citation.get("confidence", 0.0),
         EXTRACTION_EVIDENCE,
+        json.dumps(citation.get("grobid") or {}, ensure_ascii=False),
     )
+
+
+def _citation_from_row(row: sqlite3.Row) -> CitationRecord:
+    """Rebuild a citation record, expanding the stored GROBID payload."""
+    try:
+        stored = json.loads(row["grobid_json"] or "{}")
+    except (TypeError, json.JSONDecodeError):
+        stored = {}
+    grobid = stored if isinstance(stored, dict) else {}
+    citation: CitationRecord = {
+        "raw_reference": row["raw_reference"],
+        "doi": row["doi"],
+        "status": row["status"],
+        "confidence": row["confidence"],
+        "evidence": row["evidence"],
+        "target_id": row["target_id"],
+        "target_note": row["target_note"],
+        "grobid": grobid,
+    }
+    for field in _REFERENCE_FIELDS:
+        if grobid.get(field) is not None:
+            citation[field] = grobid[field]
+    return citation
 
 
 def insert_resolved_citations(
@@ -115,7 +160,7 @@ def citations_for_paper(database_path: Path, paper_id: str) -> list[CitationReco
     with connect(database_path) as db:
         db.row_factory = sqlite3.Row
         rows = db.execute(_CITATIONS_FOR_PAPER_SQL, (paper_id,)).fetchall()
-    return [dict(row) for row in rows]
+    return [_citation_from_row(row) for row in rows]
 
 
 def document_for_digest(database_path: Path, digest: str) -> StoredDocument | None:

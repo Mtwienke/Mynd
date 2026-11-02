@@ -41,9 +41,27 @@ GROBID_XML = """<?xml version="1.0" encoding="UTF-8"?>
         <listBibl>
           <biblStruct>
             <analytic>
-              <title>A cited paper</title>
+              <title level="a" type="main">A cited paper</title>
+              <author>
+                <persName><forename>Ada</forename><surname>Lovelace</surname></persName>
+              </author>
+              <author>
+                <persName><forename>Alan</forename><surname>Turing</surname></persName>
+              </author>
+              <idno type="DOI">10.5555/cited</idno>
+              <idno type="arXiv">2401.00001</idno>
             </analytic>
-            <idno type="DOI">10.5555/cited</idno>
+            <monogr>
+              <title level="j">Journal of Examples</title>
+              <imprint>
+                <biblScope unit="volume">12</biblScope>
+                <biblScope unit="issue">3</biblScope>
+                <biblScope unit="page" from="10" to="20">10-20</biblScope>
+                <date type="published" when="2023-05-01">2023</date>
+                <publisher>Example Press</publisher>
+              </imprint>
+            </monogr>
+            <ptr target="https://example.org/cited"/>
           </biblStruct>
           <biblStruct>
             <analytic>
@@ -69,8 +87,23 @@ def test_extract_grobid_references_parses_tei(tmp_path):
         references = extract_grobid_references(pdf, base_url="http://localhost:8070")
 
     assert len(references) == 2
-    assert references[0]["doi"] == "10.5555/cited"
-    assert references[0]["title"] == "A cited paper"
+    first = references[0]
+    assert first["doi"] == "10.5555/cited"
+    assert first["title"] == "A cited paper"
+    assert first["authors"] == ["Ada Lovelace", "Alan Turing"]
+    assert first["year"] == 2023
+    assert first["venue"] == "Journal of Examples"
+    assert first["volume"] == "12"
+    assert first["issue"] == "3"
+    assert first["pages"] == "10-20"
+    assert first["publisher"] == "Example Press"
+    assert first["url"] == "https://example.org/cited"
+    assert first["grobid"]["identifiers"] == {
+        "doi": "10.5555/cited",
+        "arxiv": "2401.00001",
+    }
+    assert "A cited paper" in first["grobid"]["tei"]
+    assert "biblStruct" in first["grobid"]["tei"]
     assert references[1]["doi"] is None
     assert references[1]["title"] == "No DOI reference"
     assert post.call_args.kwargs["timeout"] == 90.0
