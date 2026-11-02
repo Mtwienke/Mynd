@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from mynd.files import atomic_write_text
-from mynd.identity import migrate_legacy_note, slugify
+from mynd.identity import migrate_legacy_note, note_filename, slugify
 from mynd.vault.note_writer import (
     PaperNote,
     _yaml_quote,
@@ -173,6 +173,45 @@ def test_write_reference_placeholder_falls_back_to_raw_year(tmp_path):
     content = path.read_text(encoding="utf-8")
     assert "year: 2021" in content
     assert "[[2021]]" in content
+
+
+def test_placeholder_cited_by_points_to_actual_citing_note(tmp_path):
+    vault = tmp_path / "vault"
+    pdf = tmp_path / "paper.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    title = "A/B: C? | D"
+    paper_id = "doi-abcdef1234567890"
+    citing_note = write_paper_note(
+        PaperNote(vault, paper_id, {"title": title, "authors": []}, pdf)
+    )
+
+    placeholder = write_reference_placeholder(
+        vault, {"raw_reference": "Ref", "doi": "10.1234/ref"}, title, paper_id
+    )
+    content = placeholder.read_text(encoding="utf-8")
+
+    assert f"[[{citing_note.stem}]]" in content
+    assert "A/B" not in content
+    assert f"({paper_id})" not in content
+
+
+def test_placeholder_repairs_legacy_cited_by_link(tmp_path):
+    vault = tmp_path / "vault"
+    title = "A/B: C? | D"
+    paper_id = "doi-abcdef1234567890"
+    citation = {"raw_reference": "Ref", "doi": "10.1234/ref"}
+    path = write_reference_placeholder(vault, citation, title, paper_id)
+    canonical = f"[[{Path(note_filename(title, paper_id)).stem}]]"
+    legacy = f"[[{title} ({paper_id})]]"
+    path.write_text(
+        path.read_text(encoding="utf-8").replace(canonical, legacy), encoding="utf-8"
+    )
+
+    write_reference_placeholder(vault, citation, title, paper_id)
+    updated = path.read_text(encoding="utf-8")
+
+    assert canonical in updated
+    assert legacy not in updated
 
 
 def test_link_summary_citations_replaces_numbers(tmp_path):

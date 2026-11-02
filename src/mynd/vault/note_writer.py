@@ -31,6 +31,9 @@ _PARENTHESIZED_YEAR = re.compile(r"\(\s*(\d{4})\s*\)")
 _LOOSE_YEAR = re.compile(r"\b(\d{4})\b")
 _CITED_BY_LINE = re.compile(r"(?m)^- \*\*Cited by:\*\* (.+)$")
 _OBSIDIAN_LINK = re.compile(r"\[\[[^\]]+\]\]")
+_CITED_BY_WORK_ID = re.compile(
+    r"^(?P<title>.*) \((?P<work_id>(?:doi|paper)-[0-9a-fA-F]{12,16})\)$"
+)
 _PLACEHOLDER_FIELDS = ("venue", "volume", "issue", "pages", "publisher", "url")
 
 
@@ -91,7 +94,7 @@ def write_reference_placeholder(
     title = _sanitize_inline(citation.get("title") or raw or "Unknown reference")
     paper_id = doi_work_id(doi) if doi else title_work_id(title)
     year = _publication_year(citation, raw)
-    link = f"[[{_sanitize_inline(citing_title)} ({citing_paper_id})]]"
+    link = _citing_note_link(citing_title, citing_paper_id)
 
     placeholders_dir = vault / "11 Citation Placeholders"
     placeholders_dir.mkdir(parents=True, exist_ok=True)
@@ -130,10 +133,31 @@ def _publication_year(citation: CitationRecord, raw: str) -> int | None:
     return None
 
 
+def _citing_note_link(citing_title: str, citing_paper_id: str) -> str:
+    """Return a link that resolves to the citing paper's actual note filename."""
+    filename = note_filename(_sanitize_inline(citing_title), citing_paper_id)
+    return f"[[{filename.removesuffix('.md')}]]"
+
+
+def _canonical_cited_by_link(link: str) -> str:
+    """Normalize a stored citing-paper link to the note filename Obsidian uses."""
+    inner = link[2:-2]
+    match = _CITED_BY_WORK_ID.match(inner)
+    if match is None:
+        return link
+    filename = note_filename(match.group("title"), match.group("work_id"))
+    return f"[[{filename.removesuffix('.md')}]]"
+
+
 def _cited_by_links(content: str) -> list[str]:
     """Return previously recorded citing-paper links in source order."""
     match = _CITED_BY_LINE.search(content)
-    return _OBSIDIAN_LINK.findall(match.group(1)) if match else []
+    if match is None:
+        return []
+    return [
+        _canonical_cited_by_link(link)
+        for link in _OBSIDIAN_LINK.findall(match.group(1))
+    ]
 
 
 def _fence_safe(value: str) -> str:
