@@ -3,6 +3,8 @@
 A local-first Python research library that ingests PDFs from an inbox, stores
 metadata in SQLite, and writes readable paper notes into an Obsidian vault.
 
+<img src="scorecard.png" width="100%">
+
 ## Project layout
 
 The installable code lives under `src/` and is split by responsibility:
