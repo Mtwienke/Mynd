@@ -5,6 +5,8 @@ from typing import Literal, NotRequired, Required, TypedDict
 
 CitationStatus = Literal["resolved", "external", "unresolved", "ambiguous"]
 InferenceMode = Literal["normal", "silent"]
+MIN_YEAR = 1000
+MAX_YEAR = 2999
 
 
 class PaperMetadata(TypedDict, total=False):

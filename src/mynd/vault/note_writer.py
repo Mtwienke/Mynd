@@ -5,7 +5,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from mynd.contracts import CitationRecord, PaperMetadata
+from mynd.contracts import MAX_YEAR, MIN_YEAR, CitationRecord, PaperMetadata
 from mynd.files import atomic_write_text
 from mynd.identity import (
     WHITESPACE,
@@ -119,13 +119,13 @@ def write_reference_placeholder(
 def _publication_year(citation: CitationRecord, raw: str) -> int | None:
     """Use GROBID's year first, then fall back to the raw reference text."""
     value = citation.get("year")
-    if isinstance(value, int) and 1000 <= value <= 2999:
+    if isinstance(value, int) and MIN_YEAR <= value <= MAX_YEAR:
         return value
     candidates = (str(value or ""), raw)
     for pattern in (_PARENTHESIZED_YEAR, _LOOSE_YEAR):
         for source in candidates:
             match = pattern.search(source)
-            if match and 1000 <= int(match.group(1)) <= 2999:
+            if match and MIN_YEAR <= int(match.group(1)) <= MAX_YEAR:
                 return int(match.group(1))
     return None
 

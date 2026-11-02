@@ -6,7 +6,7 @@ from typing import Any
 import httpx
 from defusedxml import ElementTree as ET
 
-from mynd.contracts import GrobidReference, ReferenceRecord
+from mynd.contracts import MAX_YEAR, MIN_YEAR, GrobidReference, ReferenceRecord
 from mynd.resolution.doi import normalize_doi
 
 TEI_NAMESPACE = "http://www.tei-c.org/ns/1.0"
@@ -121,7 +121,7 @@ def _year(node: XmlNode) -> int | None:
     for date in ordered:
         value = date.attrib.get("when") or _text(date)
         match = _YEAR.search(value or "")
-        if match and 1000 <= int(match.group(1)) <= 2999:
+        if match and MIN_YEAR <= int(match.group(1)) <= MAX_YEAR:
             return int(match.group(1))
     return None
 
