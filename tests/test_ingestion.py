@@ -7,7 +7,7 @@ import httpx
 import pytest
 
 from mynd.core import ingest_inbox, ingest_pdf
-from mynd.questionnize import QuestionGenerationError, QuestionSet
+from mynd.questionnize import QuestionAnswer, QuestionGenerationError, QuestionSet
 from mynd.settings import load_settings
 from mynd.storage.database import initialize_database
 

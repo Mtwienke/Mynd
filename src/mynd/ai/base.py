@@ -21,3 +21,11 @@ class TextGenerator(Protocol):
     def close(self) -> None:
         """Release any network resources held by the backend."""
         ...
+
+
+@runtime_checkable
+class StructuredTextGenerator(Protocol):
+    """Optional capability; ordinary paper generation keeps its existing contract."""
+
+    def generate_structured(self, prompt: str, schema: dict) -> str:
+        ...

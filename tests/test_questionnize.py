@@ -223,6 +223,17 @@ def test_questionnize_note_rejects_notes_without_a_usable_summary(tmp_path):
         questionnize_note(note, FakeQuestionWriter(_questions()))
 
 
+def test_paper_question_writer_cannot_damage_managed_course_blocks(tmp_path):
+    note = tmp_path / "lecture.md"
+    content = ("---\ntype: lecture\n---\n<!-- mynd:questions:begin -->\n"
+               "## Extracted questions\n\nExisting lecture questions.\n"
+               "<!-- mynd:questions:end -->\n")
+    note.write_text(content)
+    with pytest.raises(ValueError, match="mynd ingest --kind slides --regenerate"):
+        write_questions(note, _questions())
+    assert note.read_text() == content
+
+
 def test_resolve_note_path_accepts_paths_paper_ids_and_dois(tmp_path):
     initialize_database(tmp_path / "library.sqlite3")
     note = tmp_path / "paper.md"

@@ -217,10 +217,17 @@ class OllamaGenerator:
 
     def generate(self, prompt: str) -> str:
         """Generate a completion, retrying with safe limits if thermals change."""
+        return self._generate(prompt)
+
+    def generate_structured(self, prompt: str, schema: dict) -> str:
+        """Constrain course JSON while retaining the same streaming/thermal controls."""
+        return self._generate(prompt, schema)
+
+    def _generate(self, prompt: str, schema: dict | None = None) -> str:
         runtime = self.runtime_control
         while True:
             attempt = self._prepare_attempt(runtime)
-            pieces, final_item, interrupted = self._run_request(prompt, attempt)
+            pieces, final_item, interrupted = self._run_request(prompt, attempt, schema)
             if interrupted:
                 self.progress(
                     "Thermal state changed; restarting this model request with safe limits"
@@ -245,12 +252,17 @@ class OllamaGenerator:
         return _Attempt(mode=mode, fan_active=fan_active)
 
     def _run_request(
-        self, prompt: str, attempt: _Attempt
+        self, prompt: str, attempt: _Attempt, schema: dict | None = None
     ) -> tuple[list[str], dict, bool]:
         """Send one request, streaming pieces and reporting runtime allocation."""
         runtime = self.runtime_control
         payload: dict = {"model": self.model, "prompt": prompt, "stream": True}
+        if schema is not None:
+            payload["format"] = schema
         options = runtime.ollama_options(attempt.mode, attempt.fan_active) if runtime else {}
+        if schema is not None:
+            # Leave room for source text, schema-backed output, and multilingual tokenization.
+            options.setdefault("num_ctx", 8192)
         if options:
             payload["options"] = options
         if attempt.fan_active:

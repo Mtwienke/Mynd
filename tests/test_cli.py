@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 from typer.testing import CliRunner
 
 from mynd.cli import _grobid_health_url, _wait_for_grobid, app
-from mynd.questionnize import QuestionSet
+from mynd.questionnize import QuestionAnswer, QuestionSet
 from mynd.settings import Settings
 
 runner = CliRunner()

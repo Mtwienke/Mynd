@@ -3,6 +3,7 @@
 vault_path = "./Obsidian/MyndVault"
 data_path = "./vault"
 inbox_path = "./vault/00 Inbox"
+slides_inbox_path = "./vault/00 Inbox/Slides"
 pdf_store_path = "./vault/10 Papers"
 database_path = "./vault/mynd.sqlite3"
 

@@ -232,6 +232,8 @@ def _finalize_ingestion(
         except ValueError as exc:
             questions_error = str(exc)
             progress(f"Skipping extracted questions: {exc}")
+    else: 
+        progress(f"Skipping extracted questions: no summary or questionnizer available. Questionizer: {questionnizer}, summary: {summary}")
 
     citing_title = prepared.metadata.get("title") or prepared.source_pdf.stem
     for citation in citations:

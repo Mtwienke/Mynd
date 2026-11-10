@@ -52,6 +52,11 @@ def extract_section(content: str, heading: str) -> str:
 def write_questions(note_path: Path, questions: QuestionSet) -> Path:
     """Insert or replace the extracted-questions chapter in a paper note."""
     content = note_path.read_text(encoding="utf-8")
+    if "<!-- mynd:" in content and re.search(r"(?m)^type: (lecture|course)\s*$", content):
+        raise ValueError(
+            "Course notes use slide-grounded questions and managed blocks. "
+            "Regenerate them with `mynd ingest --kind slides --regenerate`, not paper questionnize."
+        )
     atomic_write_text(
         note_path,
         _upsert_section(

@@ -99,6 +99,21 @@ def test_ollama_generator_generate_collects_stream():
     assert gen.generate("prompt") == "Hello world"
 
 
+def test_structured_generation_uses_schema_without_changing_normal_requests():
+    gen = OllamaGenerator(OllamaConfig(model="mistral"))
+    gen.client = MagicMock()
+    gen.client.stream.side_effect = [
+        _stream_context(['{"response": "{}", "done": true}']),
+        _stream_context(['{"response": "Normal answer", "done": true}']),
+    ]
+    schema = {"type": "object", "properties": {}}
+    assert gen.generate_structured("Course prompt", schema) == "{}"
+    assert gen.client.stream.call_args.kwargs["json"]["format"] == schema
+    assert gen.client.stream.call_args.kwargs["json"]["options"]["num_ctx"] == 8192
+    assert gen.generate("Paper prompt") == "Normal answer"
+    assert "format" not in gen.client.stream.call_args.kwargs["json"]
+
+
 def test_ollama_generator_generate_empty_raises():
     gen = OllamaGenerator(OllamaConfig(model="mistral"))
     gen.client = MagicMock()

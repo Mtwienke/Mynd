@@ -28,6 +28,16 @@ class Settings:
     use_grobid: bool = True
     crossref_email: str = DEFAULT_CROSSREF_EMAIL
     allow_remote_services: bool = False
+    slides_inbox_path: Path | None = None
+
+    @property
+    def slides_inbox(self) -> Path:
+        """A separate inbox prevents course PDFs from entering the paper pipeline."""
+        return self.slides_inbox_path or self.inbox_path / "Slides"
+
+    @property
+    def slides_library(self) -> Path:
+        return self.vault_path / "15 Slides"
 
     @property
     def mode_file(self) -> Path:
@@ -59,4 +69,5 @@ def load_settings(path: Path) -> Settings:
         use_grobid=bool(raw.get("use_grobid", True)),
         crossref_email=raw.get("crossref_email", DEFAULT_CROSSREF_EMAIL),
         allow_remote_services=bool(raw.get("allow_remote_services", False)),
+        slides_inbox_path=resolve(raw["slides_inbox_path"]) if "slides_inbox_path" in raw else None,
     )

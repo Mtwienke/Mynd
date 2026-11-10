@@ -1,6 +1,7 @@
 import json
 import shutil
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -10,6 +11,9 @@ import typer
 from mynd.ai.models import build_text_generator
 from mynd.ai.runtime import RuntimeControl
 from mynd.core import ingest_inbox
+from mynd.courses.conversion import powerpoint_available
+from mynd.courses.pipeline import ingest_slides
+from mynd.courses.review import review_assignment
 from mynd.questionnize import QuestionWriter
 from mynd.questionnize.service import questionnize_note, resolve_note_path
 from mynd.resolution.crossref import CrossrefClient
@@ -55,23 +59,48 @@ def ingest(
         "-v",
         help="Show Ollama request, allocation, and generation timing diagnostics",
     ),
+    kind: str = typer.Option("all", "--kind", help="Process all, papers, or slides"),
+    regenerate: bool = typer.Option(False, "--regenerate", help="Regenerate slide study material"),
+    non_interactive: bool = typer.Option(
+        False, "--non-interactive", help="Leave unconfirmed slide assignments pending review",
+    ),
 ) -> None:
-    """Process every PDF in the configured inbox."""
+    """Ingest paper PDFs and reviewed course slides from their separate inboxes."""
     settings = settings_from(config)
+    if kind not in {"all", "papers", "slides"}:
+        raise typer.BadParameter("--kind must be all, papers, or slides")
     if mode is not None:
         try:
             RuntimeControl(settings.mode_file).set_mode(mode)
         except ValueError as exc:
             raise typer.BadParameter(str(exc)) from exc
-    client = CrossrefClient(settings.crossref_email)
-    try:
-        results = ingest_inbox(settings, client, verbose=verbose)
-    finally:
-        client.close()
+    results = []
+    if kind in {"all", "papers"}:
+        client = CrossrefClient(settings.crossref_email)
+        try:
+            results.extend(ingest_inbox(settings, client, verbose=verbose))
+        finally:
+            client.close()
+    slides_results = []
+    if kind in {"all", "slides"}:
+        reviewer = None
+        if not non_interactive and sys.stdin.isatty():
+            def reviewer(source, proposal, known):
+                try:
+                    return review_assignment(source, proposal, known, settings.slides_library)
+                except typer.Abort as exc:
+                    # Cancellation is a user interrupt, not a recoverable per-file failure.
+                    raise KeyboardInterrupt from exc
+
+        slides_results = ingest_slides(settings, reviewer, verbose=verbose, regenerate=regenerate)
+        results.extend(slides_results)
     for result in results:
         typer.echo(json.dumps(result, ensure_ascii=False, default=str))
     if not results:
-        typer.echo(f"No PDFs found in {settings.inbox_path}")
+        typer.echo("No input files or pending course updates found in the selected inboxes")
+    if any(item["status"] in {"failed", "partial", "pending_review", "course_partial"}
+           for item in slides_results):
+        raise typer.Exit(code=1)
 
 
 @app.command("mode")
@@ -139,12 +168,19 @@ def doctor(
 ) -> None:
     """Create directories and check basic configuration."""
     settings = settings_from(config)
-    for path in (settings.inbox_path, settings.pdf_store_path, settings.vault_path):
+    for path in (settings.inbox_path, settings.pdf_store_path, settings.vault_path,
+                 settings.slides_inbox, settings.slides_library):
         path.mkdir(parents=True, exist_ok=True)
     typer.echo(f"Vault: {settings.vault_path}")
     typer.echo(f"Inbox: {settings.inbox_path}")
     typer.echo(f"PDF store: {settings.pdf_store_path}")
     typer.echo(f"Database: {settings.database_path}")
+    typer.echo(f"Slides inbox: {settings.slides_inbox}")
+    typer.echo(f"Slides library: {settings.slides_library}")
+    typer.echo("PowerPoint PDF conversion: " + (
+        "Available (Automation permission may be required)" if powerpoint_available()
+        else "Unavailable; PPTX requires PowerPoint on macOS, or manual PDF export"
+    ))
     if start_grobid and settings.use_grobid:
         docker = shutil.which("docker")
         if docker is None:
