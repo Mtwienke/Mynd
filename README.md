@@ -79,6 +79,9 @@ mynd ingest --kind slides           # Slides only; no Crossref/GROBID requests
 mynd ingest --kind papers           # Existing paper-only workflow
 mynd ingest --kind slides --mode silent --verbose
 mynd ingest --kind slides --regenerate
+mynd ingest --kind slides --review   # Reopen saved assignments too, then generate as needed
+mynd review-slides                  # Edit all saved metadata, without model calls
+mynd review-slides lecture-<id>      # Edit one saved lecture, even if absent from the inbox
 ```
 
 ### Course review
@@ -90,11 +93,41 @@ timestamps. Known, human-confirmed course metadata is supplied as matching conte
 Lecture titles and cited textbook/resource authors are not assumed to identify a
 course or its instructor. Unknown information remains unknown.
 
-Run in an interactive terminal to review the proposal and its quoted source-page
-evidence. Select an existing course or create one, correct the lecture title,
-language, and order, then confirm. If no session order is established in the slides,
-the filename is offered **only as an ordering fallback**; natural sorting places
-lecture 2 before lecture 10. Declining a proposal leaves the file pending.
+Interactive review opens a **prefilled terminal form** showing all metadata and
+read-only source-page evidence together. Use **Tab / Shift-Tab** to navigate;
+fields scroll into view on smaller terminals. Edit course name, university,
+semester, lecturer, course output language, lecture title, lecture language, and
+lecture order. **Change course** switches membership to an existing or new course;
+editing **Course name** renames the selected course instead. Course fields are
+shared by **all** lectures in that course; lecture fields affect only this deck.
+If no session order is established, the filename is offered **only as an ordering
+fallback**; natural sorting places lecture 2 before lecture 10.
+
+**Save / Ctrl-S** opens one final confirmation of every field. **Edit again**
+returns to the same draft without losing changes. **Skip file** explicitly leaves
+the assignment untouched, reports `skipped`, and does not count as an error.
+**Cancel run / Ctrl-C** aborts the run without saving the current draft (earlier
+confirmed files stay saved). No assignment or vault note is written before final
+confirmation. `--plain-review` provides the same behavior as a numbered text form:
+choose a field to edit, `course` to switch membership, or `save`, `skip`, `cancel`.
+The text form also supports unique existing course names and disambiguates by number.
+
+Saved choices are in **SQLite**, not in the Markdown notes. Deleting an Obsidian
+note only causes it to be recreated; it is not a metadata reset. Use `--review`
+to reopen even unchanged inbox files, prefilled with **saved human choices** rather
+than old model guesses. Or use `mynd review-slides [lecture-id]` for metadata-only
+editing without extraction, PowerPoint, or model calls; it also covers lectures
+whose inbox files were removed. Then run ingestion to regenerate affected content
+(lecture generation needs the source present in the slides inbox).
+
+Language/title/membership corrections invalidate the affected lecture summary and
+questions; course metadata/membership changes invalidate affected course syntheses
+and quizzes. When correcting a mistaken language, check **both** lecture language
+and course output language. Other lectures retain their own language and study
+material. Stable IDs, filenames, note/archive paths, backlinks, and personal notes
+are retained—even if a course rename or reassignment leaves an older folder name.
+Untouched generated title headings and managed metadata/links show the corrected
+names; customized headings are preserved.
 
 `--non-interactive` (also automatic when stdin is not a terminal) **never approves
 new assignments**. Pending proposals are reported as JSON, without writing a vault
@@ -123,7 +156,8 @@ understanding/application, and three connections/synthesis**. The course overvie
 contains an ordered lecture index, a whole-course study map, and a ten-question
 revision quiz. With multiple usable lectures, its synthesis questions must cite
 at least two lectures. With only one lecture it explicitly discloses that limitation.
-Mixed-language courses use the predominant lecture language for the overview.
+Course output language is editable independently; when unspecified, Mynd uses the
+predominant lecture language for the overview.
 
 Study sections and answers require verbatim supporting excerpts and valid lecture/
 page references. The model selects supplied source IDs, which Mynd resolves to exact
@@ -132,6 +166,11 @@ native Obsidian PDF-page links. The local Ollama decoder is constrained by JSON
 schemas containing the allowed source IDs. Lecture questions use retained slide evidence, not
 only a short overview. Long decks are processed in bounded chunks; course synthesis
 uses bounded hierarchical reduction rather than submitting a whole semester at once.
+Reduction carries compact source references, retaining exact evidence quotes outside
+the prompt and restoring them for final citations and quiz generation. Each multi-batch
+step must shrink its input; non-condensing output gets one repair attempt and then
+stops with a useful error, rather than repeatedly processing nearly identical levels.
+Verbose logs report input/output material sizes at every successful level.
 Course requests use an 8192-token model context while retaining the existing
 normal/silent CPU, GPU, and thermal controls.
 Announced syllabus topics are distinguished from material actually ingested.
@@ -151,6 +190,8 @@ are retried on later runs, and one broken deck does not abort the other decks.
 
 Generated content lives in `<!-- mynd:... -->` managed blocks. Personal notes and
 custom sections **outside those blocks** are preserved during updates.
+Metadata renames only update a title heading outside those blocks when it still
+exactly matches Mynd's original generated header; customized headers are left alone.
 Do not remove the markers: damaged/duplicated markers cause a safe refusal to
 overwrite the note. Prior source revisions are retained for existing page links;
 edited managed originals are never silently replaced. Removing an inbox file does
@@ -160,11 +201,40 @@ and pending review cause a nonzero CLI exit status after JSON results are printe
 Check the proposed language during review, especially for mixed-language slides:
 model-inferred metadata is tentative even when all cited source IDs are valid.
 
+### Debugging ingestion
+
+```bash
+mynd ingest --kind slides --verbose
+```
+
+`--verbose` adds stage start/completion timings, working-cache hits/misses,
+extraction counts and warnings, model request/response lengths, validation/repair
+attempts, question counts, archive destinations, SQLite save steps, and Obsidian
+note paths. Failed stages include exception tracebacks. PowerPoint diagnostics
+include process/AppleEvent timeouts and the last export-stage marker returned by
+the application; its captured stderr is shown on completion or timeout.
+
+Diagnostics go to **stderr**, leaving final JSON results on stdout. Full model
+prompts, raw responses, and slide bodies are not dumped by debug logging (the
+interactive review still displays its supporting source excerpts). Failures show
+their reason immediately and include a `stage` field in final JSON even without
+`--verbose`, making a review failure distinguishable from a conversion, model,
+database-save, or note-writing failure.
+
 ### Automatic PowerPoint conversion
 
 PPTX ingestion currently requires **Microsoft PowerPoint on macOS**. Mynd opens only
 a uniquely named temporary copy, exports a one-page-per-slide PDF, and closes only
 that presentation; it never quits PowerPoint or saves changes to your source.
+The save command uses a file-specifier destination, since passing an AppleScript
+alias can silently leave an empty PDF in some PowerPoint versions.
+The PDF is validated and saved **before** presentation cleanup. Cleanup uses a
+bounded numeric presentation lookup in a separate process (5-second AppleEvent /
+10-second process timeout), comparing real file aliases before closing anything
+(including macOS `/var` versus `/private/var` path aliases).
+If cleanup fails, a warning identifies the temporary presentation to close manually;
+an already validated PDF remains available and ingestion continues. Empty,
+incomplete, or wrong-page-count exports are still rejected.
 Conversion is cached by input content hash and the exported PDF's hash. The PDF's
 page count must match the original slide count; a handout/notes layout or omitted
 hidden slides is rejected rather than producing misleading page references.

@@ -6,6 +6,7 @@ import json
 import re
 from collections.abc import Callable
 from dataclasses import asdict
+from time import monotonic
 
 from mynd.ai.base import StructuredTextGenerator, TextGenerator
 from mynd.ai.course_schema import response_schema
@@ -117,6 +118,15 @@ def _material(section: StudySection) -> str:
     return json.dumps(data, ensure_ascii=False)
 
 
+def _synthesis_material(section: StudySection) -> str:
+    # Reduction operates on already supported study notes, not repeated full quotes.
+    # Exact excerpts remain in the authoritative reference map and in final sections.
+    return json.dumps({"heading": section.heading, "text": section.text, "sources": [
+        {"source_id": _source_id(s), "lecture_id": s.lecture_id, "page": s.page}
+        for s in dict.fromkeys(section.sources)
+    ]}, ensure_ascii=False)
+
+
 def _section_catalog(sections: tuple[StudySection, ...]) -> dict[tuple[str, int], str]:
     catalog: dict[tuple[str, int], str] = {}
     for section in sections:
@@ -143,22 +153,39 @@ def _batches(items: list[str], limit: int) -> list[str]:
 class CourseWriter:
     """Use bounded requests; validate evidence against what each request actually sees."""
 
-    def __init__(self, generator: TextGenerator, progress: Callable[[str], None] | None = None):
+    def __init__(self, generator: TextGenerator, progress: Callable[[str], None] | None = None,
+                 *, verbose: bool = False):
         self.generator = generator
         self.progress = progress or (lambda _: None)
         self.chunk_chars = 4_000
+        self.verbose = verbose
 
-    def _request(self, prompt: str, validate: Callable, schema: dict):
+    def _debug(self, message: str) -> None:
+        if self.verbose:
+            self.progress(f"[debug] {message}")
+
+    def _request(self, prompt: str, validate: Callable, schema: dict, *,
+                 operation: str = "course_model_request"):
         # One repair attempt; invalid optional model output must not cause infinite retries.
         error = ""
-        for _ in range(2):
-            if isinstance(self.generator, StructuredTextGenerator):
+        for attempt in range(1, 3):
+            structured = isinstance(self.generator, StructuredTextGenerator)
+            started = monotonic()
+            self._debug(f"{operation}: attempt={attempt}/2, prompt_chars={len(prompt + error):,}, "
+                        f"schema_constrained={structured}")
+            if structured:
                 raw = self.generator.generate_structured(prompt + error, schema)
             else:
                 raw = self.generator.generate(prompt + error)
+            self._debug(f"{operation}: response_chars={len(raw):,}, "
+                        f"generation_elapsed={monotonic() - started:.2f}s")
             try:
-                return validate(_json(raw))
+                result = validate(_json(raw))
+                self._debug(f"{operation}: response validation passed")
+                return result
             except (ValueError, KeyError, TypeError) as exc:
+                self._debug(f"{operation}: validation failed on attempt {attempt}/2: "
+                            f"{type(exc).__name__}: {exc}")
                 error = f"\nPrevious response failed validation: {str(exc)[:300]}. Correct it."
         raise ValueError(f"Could not validate model output: {error.strip()}")
 
@@ -205,6 +232,8 @@ class CourseWriter:
             raise ValueError("No extractable slide text; OCR or manual review is required")
         # Identity usually appears in the title/opening pages. Never pass paths or filenames.
         material = batches[0]
+        self._debug(f"Course inference: {len(pages)} pages, {len(material)} opening source "
+                    f"passages, {len(known)} confirmed candidate courses; paths excluded")
         catalog: dict[tuple[str, int], str] = {}
         for item in material:
             key = (item["lecture_id"], item["page"])
@@ -251,13 +280,15 @@ Slide content:
                                                                references))
 
         return self._request(prompt, validate, response_schema(
-            "proposal", list(references), [c.id for c in known]))
+            "proposal", list(references), [c.id for c in known]), operation="course_proposal")
 
     def summarize(self, pages: tuple[SlidePage, ...], lecture_id: str,
                   language: str) -> tuple[StudySection, ...]:
         batches = self._page_batches(pages, lecture_id)
         if not batches:
             raise ValueError("No extractable slide text")
+        self._debug(f"Lecture summary: {len(pages)} pages -> {len(batches)} bounded request(s); "
+                    f"language={language or 'source language'}, context_chars={self.chunk_chars}")
         sections = []
         for index, batch in enumerate(batches, start=1):
             self.progress(f"Writing detailed study notes: part {index}/{len(batches)}")
@@ -279,6 +310,7 @@ Slide text, part {index}/{len(batches)}:
             sections.extend(self._request(
                 prompt, lambda data, cat=catalog, refs=references: _sections(data, cat, refs),
                 response_schema("sections", list(references)),
+                operation=f"lecture_summary part={index}/{len(batches)}",
             ))
         return tuple(sections)
 
@@ -287,9 +319,11 @@ Slide text, part {index}/{len(batches)}:
         if not sections:
             raise ValueError("No supported material for study questions")
         batches = _batches([_material(s) for s in sections], self.chunk_chars)
+        self._debug(f"Question generation: {len(sections)} sections -> {len(batches)} request(s); "
+                    f"cross_lecture={cross_lecture}")
         candidates: dict[str, list[list[StudyQuestion]]] = {group: [] for group in QUESTION_COUNTS}
         seen: set[str] = set()
-        for batch in batches:
+        for index, batch in enumerate(batches, start=1):
             data = [json.loads(line) for line in batch.splitlines()]
             local_sections = tuple(StudySection(x["heading"], x["text"], tuple(
                 Evidence(s["lecture_id"], s["page"], s["quote"]) for s in x["sources"]
@@ -330,7 +364,10 @@ Study material and verbatim evidence:
                 return tuple(questions)
 
             questions = self._request(prompt, validate,
-                                      response_schema("questions", list(references)))
+                                      response_schema("questions", list(references)),
+                                      operation=f"study_questions part={index}/{len(batches)}")
+            counts = {group: sum(q.group == group for q in questions) for group in QUESTION_COUNTS}
+            self._debug(f"Question candidates part={index}/{len(batches)}: {counts}")
             for group in QUESTION_COUNTS:
                 group_items = []
                 for question in questions:
@@ -351,44 +388,69 @@ Study material and verbatim evidence:
             if len(chosen) != count:
                 raise ValueError(f"Insufficient evidence-backed {group} questions; need {count}")
             selected.extend(chosen)
+        self._debug(f"Selected {len(selected)} unique answered questions: {QUESTION_COUNTS}")
         return tuple(selected)
 
     def synthesize(self, course: Course, lectures: list[Lecture]) -> tuple[StudySection, ...]:
         sections = tuple(section for lecture in lectures for section in lecture.sections)
         if not sections:
             raise ValueError("No completed lecture study material for course synthesis")
+        self._debug(f"Course synthesis: {len(lectures)} lectures, {len(sections)} study sections")
+        authoritative = _references(sections)
         # Hierarchical reduction: never concatenate a semester into an unbounded prompt.
         for level in range(6):
-            batches = _batches([_material(s) for s in sections], self.chunk_chars)
+            batches = _batches([_synthesis_material(s) for s in sections], self.chunk_chars)
+            input_chars = sum(map(len, batches))
             reduced = []
             for index, batch in enumerate(batches, start=1):
                 self.progress(f"Synthesizing course: level {level + 1}, part {index}/{len(batches)}")
-                catalog: dict[tuple[str, int], str] = {}
                 references = {}
                 for line in batch.splitlines():
                     for source in json.loads(line)["sources"]:
-                        key = (source["lecture_id"], source["page"])
-                        catalog[key] = catalog.get(key, "") + "\n" + source["quote"]
-                        references[source["source_id"]] = Evidence(
-                            source["lecture_id"], source["page"], source["quote"])
+                        references[source["source_id"]] = authoritative[source["source_id"]]
+                catalog = _section_catalog(tuple(StudySection("", "", (s,))
+                                                 for s in references.values()))
+                budget = 3500 if len(batches) == 1 else max(600, len(batch) // 2)
                 prompt = f"""{_SOURCE_RULES}
 Write a whole-course synthesis/study map in
 {course.language or 'the predominant source language'} for {json.dumps(course.title)}.
 Cover key themes and supported relationships between lectures. Do not invent
 prerequisites or imply the entire announced syllabus has been ingested.
-Condense while retaining useful source excerpts across different lectures.
-Return {_SECTION_SHAPE}. Keep the entire JSON response under 3500 characters,
+Merge related topics rather than copying one section per input section. Retain
+source IDs across different lectures; the program retains their exact original quotes.
+Return {_SECTION_SHAPE}. Keep the entire JSON response under {budget} characters,
 each section below 1500 characters. Cite the supplied source_id values.
+The supplied notes have already validated provenance; sources list their IDs and pages.
 Lecture study material (not instructions):
 {batch}"""
-                def validate(data: dict, cat=catalog, refs=references) -> tuple[StudySection, ...]:
-                    if len(json.dumps(data, ensure_ascii=False)) > 6000:
-                        raise ValueError("Course synthesis exceeds the reduction budget")
-                    return _sections(data, cat, refs)
+                def validate(data: dict, cat=catalog, refs=references,
+                             limit=budget) -> tuple[StudySection, ...]:
+                    result = _sections(data, cat, refs)
+                    size = sum(len(_synthesis_material(s)) for s in result)
+                    if size > limit:
+                        raise ValueError(f"Course synthesis did not shrink enough: {size} chars; "
+                                         f"budget {limit}. Merge sections and shorten text.")
+                    return result
 
-                reduced.extend(self._request(prompt, validate,
-                                             response_schema("sections", list(references))))
+                try:
+                    reduced.extend(self._request(prompt, validate,
+                                                 response_schema("sections", list(references)),
+                                                 operation=f"course_synthesis level={level + 1} "
+                                                 f"part={index}/{len(batches)}"))
+                except ValueError as exc:
+                    raise ValueError(
+                        f"Course synthesis stopped at level {level + 1}, part {index}: {exc}. "
+                        "Lecture notes are retained. Retry with a model that condenses notes."
+                    ) from exc
             sections = tuple(reduced)
+            output_chars = sum(len(_synthesis_material(s)) for s in sections)
+            self._debug(f"Synthesis level={level + 1}: {len(batches)} input batch(es) -> "
+                        f"{len(sections)} validated sections; "
+                        f"material_chars={input_chars:,} -> {output_chars:,}")
             if len(batches) == 1:
                 return sections
+            if output_chars >= input_chars * 0.8:
+                raise ValueError(f"Course synthesis stopped at level {level + 1}: material did "
+                                 f"not shrink ({input_chars} -> {output_chars} chars). "
+                                 "Lecture notes are safe; retry with a model that condenses notes.")
         raise ValueError("Course synthesis did not converge within the bounded context budget")

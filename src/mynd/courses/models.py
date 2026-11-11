@@ -64,6 +64,7 @@ class CourseProposal:
     language: str = ""
     order: str = ""
     evidence: tuple[Evidence, ...] = ()
+    saved: bool = False
 
 
 @dataclass(frozen=True)

@@ -83,6 +83,13 @@ def course_lectures(database: Path, course_id: str) -> list[Lecture]:
                   key=lambda item: (natural_order(item.order), natural_order(item.title), item.id))
 
 
+def list_lectures(database: Path) -> list[Lecture]:
+    with connect(database) as db:
+        db.row_factory = sqlite3.Row
+        rows = db.execute("SELECT * FROM lectures ORDER BY course_id, order_key, id").fetchall()
+    return [_lecture(row) for row in rows]
+
+
 def remember_source(database: Path, source: Path, lecture_id: str) -> None:
     with connect(database) as db:
         db.execute("INSERT INTO lecture_sources VALUES (?, ?) ON CONFLICT(source_path) "
@@ -90,7 +97,7 @@ def remember_source(database: Path, source: Path, lecture_id: str) -> None:
                    (str(source.resolve()), lecture_id))
 
 
-def save_lecture(database: Path, lecture: Lecture, source: Path) -> None:
+def save_lecture(database: Path, lecture: Lecture, source: Path | None = None) -> None:
     with connect(database) as db:
         db.execute("""
             INSERT INTO lectures (id, course_id, title, language, order_key, sha256,
@@ -111,9 +118,10 @@ def save_lecture(database: Path, lecture: Lecture, source: Path) -> None:
               json.dumps(records(lecture.questions), ensure_ascii=False), lecture.status,
               lecture.error, lecture.version, json.dumps(lecture.proposal, ensure_ascii=False),
               lecture.pdf_digest))
-        db.execute("INSERT INTO lecture_sources VALUES (?, ?) ON CONFLICT(source_path) "
-                   "DO UPDATE SET lecture_id=excluded.lecture_id",
-                   (str(source.resolve()), lecture.id))
+        if source is not None:
+            db.execute("INSERT INTO lecture_sources VALUES (?, ?) ON CONFLICT(source_path) "
+                       "DO UPDATE SET lecture_id=excluded.lecture_id",
+                       (str(source.resolve()), lecture.id))
 
 
 def record_job(database: Path, source: Path, status: str, error: str = "") -> None:

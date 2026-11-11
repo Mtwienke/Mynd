@@ -12,7 +12,7 @@ from mynd.ai.models import build_text_generator
 from mynd.ai.runtime import RuntimeControl
 from mynd.core import ingest_inbox
 from mynd.courses.conversion import powerpoint_available
-from mynd.courses.pipeline import ingest_slides
+from mynd.courses.pipeline import ingest_slides, review_saved_slides
 from mynd.courses.review import review_assignment
 from mynd.questionnize import QuestionWriter
 from mynd.questionnize.service import questionnize_note, resolve_note_path
@@ -49,6 +49,16 @@ def settings_from(config: Path) -> Settings:
         raise typer.BadParameter(f"Invalid config {config}: {exc}") from exc
 
 
+def _slide_reviewer(settings: Settings, plain: bool = False):
+    def reviewer(source, proposal, known):
+        try:
+            return review_assignment(source, proposal, known, settings.slides_library, plain=plain)
+        except typer.Abort as exc:
+            # Cancellation is a user interrupt, not a recoverable per-file failure.
+            raise KeyboardInterrupt from exc
+    return reviewer
+
+
 @app.command()
 def ingest(
     config: Path = typer.Option(Path("config.toml"), "--config", "-c", help="Path to config.toml"),
@@ -57,18 +67,22 @@ def ingest(
         False,
         "--verbose",
         "-v",
-        help="Show Ollama request, allocation, and generation timing diagnostics",
+        help="Show course stages, cache/save paths, failure tracebacks, and Ollama diagnostics",
     ),
     kind: str = typer.Option("all", "--kind", help="Process all, papers, or slides"),
     regenerate: bool = typer.Option(False, "--regenerate", help="Regenerate slide study material"),
     non_interactive: bool = typer.Option(
         False, "--non-interactive", help="Leave unconfirmed slide assignments pending review",
     ),
+    review: bool = typer.Option(False, "--review", help="Reopen saved slide assignments too"),
+    plain_review: bool = typer.Option(False, "--plain-review", help="Use the numbered text form"),
 ) -> None:
     """Ingest paper PDFs and reviewed course slides from their separate inboxes."""
     settings = settings_from(config)
     if kind not in {"all", "papers", "slides"}:
         raise typer.BadParameter("--kind must be all, papers, or slides")
+    if review and (kind == "papers" or non_interactive or not sys.stdin.isatty()):
+        raise typer.BadParameter("--review requires slides and an interactive terminal")
     if mode is not None:
         try:
             RuntimeControl(settings.mode_file).set_mode(mode)
@@ -85,14 +99,10 @@ def ingest(
     if kind in {"all", "slides"}:
         reviewer = None
         if not non_interactive and sys.stdin.isatty():
-            def reviewer(source, proposal, known):
-                try:
-                    return review_assignment(source, proposal, known, settings.slides_library)
-                except typer.Abort as exc:
-                    # Cancellation is a user interrupt, not a recoverable per-file failure.
-                    raise KeyboardInterrupt from exc
+            reviewer = _slide_reviewer(settings, plain_review)
 
-        slides_results = ingest_slides(settings, reviewer, verbose=verbose, regenerate=regenerate)
+        slides_results = ingest_slides(settings, reviewer, verbose=verbose, regenerate=regenerate,
+                                      review_existing=review)
         results.extend(slides_results)
     for result in results:
         typer.echo(json.dumps(result, ensure_ascii=False, default=str))
@@ -101,6 +111,30 @@ def ingest(
     if any(item["status"] in {"failed", "partial", "pending_review", "course_partial"}
            for item in slides_results):
         raise typer.Exit(code=1)
+
+
+@app.command("review-slides")
+def review_slides(
+    target: str | None = typer.Argument(None, help="Saved lecture ID (omit to review all)"),
+    config: Path = typer.Option(Path("config.toml"), "--config", "-c"),
+    plain_review: bool = typer.Option(False, "--plain-review", help="Use the numbered text form"),
+) -> None:
+    """Correct saved slide metadata without model calls, even after removing inbox files."""
+    settings = settings_from(config)
+    if not sys.stdin.isatty() and not plain_review:
+        raise typer.BadParameter("Review needs a terminal; use --plain-review for the text form")
+    try:
+        results = review_saved_slides(settings, _slide_reviewer(settings, plain_review), target)
+    except (OSError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    for result in results:
+        typer.echo(json.dumps(result, ensure_ascii=False, default=str))
+    if any(result["status"] == "metadata_updated" for result in results):
+        typer.echo("Metadata saved. Run 'mynd ingest --kind slides' to regenerate pending study "
+                   "material. Keep or restore the source in the slides inbox for lecture generation.",
+                   err=True)
+    if not results:
+        typer.echo("No saved lectures to review")
 
 
 @app.command("mode")

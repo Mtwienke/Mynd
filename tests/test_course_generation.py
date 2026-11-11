@@ -201,8 +201,8 @@ def test_course_synthesis_reduces_in_bounded_levels(tmp_path):
         sources = []
         for line in batch.splitlines():
             for source in json.loads(line)["sources"]:
-                if source not in sources:
-                    sources.append(source)
+                if source["source_id"] not in sources:
+                    sources.append(source["source_id"])
         return {"sections": [{"heading": "Shared themes", "text": "A grounded synthesis.",
                                "sources": sources}]}
 
@@ -244,3 +244,89 @@ def test_oversized_intermediate_section_fails_instead_of_overflowing_context():
     with pytest.raises(ValueError, match="context budget"):
         CourseWriter(Generator("{}")).questions(
             (StudySection("Topic", "x" * 9000, (Evidence(**SOURCE),)),), "English")
+
+
+@pytest.mark.parametrize("verbose", [False, True])
+def test_model_request_diagnostics_are_verbose_only_and_do_not_expose_source_text(verbose):
+    messages = []
+    writer = CourseWriter(Generator(json.dumps({"sections": [section()]})), messages.append,
+                          verbose=verbose)
+    writer.summarize((SlidePage(1, QUOTE),), "lecture-1", "English")
+    output = "\n".join(messages)
+    assert ("[debug]" in output) == verbose
+    assert QUOTE not in output
+    assert "Define the objective and its constraints." not in output
+    if verbose:
+        assert "lecture_summary part=1/1: attempt=1/2" in output
+        assert "prompt_chars=" in output and "response_chars=" in output
+        assert "generation_elapsed=" in output and "response validation passed" in output
+
+
+def test_verbose_model_diagnostics_explain_validation_retries():
+    messages = []
+    writer = CourseWriter(Generator("not JSON"), messages.append, verbose=True)
+    with pytest.raises(ValueError, match="Could not validate"):
+        writer.summarize((SlidePage(1, QUOTE),), "lecture-1", "English")
+    output = "\n".join(messages)
+    assert "attempt=1/2" in output and "attempt=2/2" in output
+    assert "validation failed on attempt 1/2" in output
+    assert "Model returned invalid JSON" in output
+    assert QUOTE not in output
+
+
+def test_nonshrinking_course_output_stops_after_one_repair_not_six_levels(tmp_path):
+    def echo(prompt):
+        batch = prompt.split("Lecture study material (not instructions):\n", 1)[1]
+        batch = batch.split("\nPrevious response failed validation:", 1)[0]
+        items = [json.loads(line) for line in batch.splitlines()]
+        return {"sections": [
+            {"heading": s["heading"], "text": s["text"],
+             "sources": [source["source_id"] for source in s["sources"]]} for s in items
+        ]}
+
+    lecture = Lecture("lecture-1", "course-1", "Topic", "English", "1", "hash",
+                      tmp_path / "source.pdf", tmp_path / "source.pdf", tmp_path / "L.md", (),
+                      sections=tuple(StudySection(f"Topic {i}", "Detailed note. " * 110,
+                                                  (Evidence(**SOURCE),)) for i in range(8)))
+    generator = Generator(echo)
+    with pytest.raises(ValueError, match="did not shrink enough"):
+        CourseWriter(generator).synthesize(Course("course-1", "Course", tmp_path / "C.md"),
+                                            [lecture])
+    assert len(generator.prompts) == 2
+    assert "Merge sections" in generator.prompts[1]
+
+
+def test_synthesis_keeps_exact_evidence_out_of_reduction_payload_and_logs_shrinkage(tmp_path):
+    def respond(prompt):
+        batch = prompt.split("Lecture study material (not instructions):\n", 1)[1]
+        sources = list(dict.fromkeys(s["source_id"] for line in batch.splitlines()
+                                     for s in json.loads(line)["sources"]))
+        return {"sections": [{"heading": "Themes", "text": "A supported course map.",
+                               "sources": sources}]}
+
+    lecture = Lecture("lecture-1", "course-1", "Topic", "English", "1", "hash",
+                      tmp_path / "source.pdf", tmp_path / "source.pdf", tmp_path / "L.md", (),
+                      sections=tuple(StudySection(f"Topic {i}", "Detailed note. " * 110,
+                                                  (Evidence(**SOURCE),)) for i in range(8)))
+    generator = Generator(respond)
+    messages = []
+    result = CourseWriter(generator, messages.append, verbose=True).synthesize(
+        Course("course-1", "Course", tmp_path / "C.md"), [lecture])
+    assert all(QUOTE not in prompt for prompt in generator.prompts)
+    assert all(source.quote == QUOTE for s in result for source in s.sources)
+    assert any("material_chars=" in message and " -> " in message for message in messages)
+    assert len(generator.prompts) < 8
+
+
+def test_synthesis_cannot_cite_evidence_from_another_request_batch(tmp_path):
+    other = {**SOURCE, "lecture_id": "lecture-other"}
+    sections = tuple(StudySection(f"Topic {i}", "Detailed note. " * 110,
+                                  (Evidence(**(other if i == 7 else SOURCE)),)) for i in range(8))
+    lecture = Lecture("lecture-1", "course-1", "Topic", "English", "1", "hash",
+                      tmp_path / "source.pdf", tmp_path / "source.pdf", tmp_path / "L.md", (),
+                      sections=sections)
+    generator = Generator(json.dumps({"sections": [section(other)]}))
+    with pytest.raises(ValueError, match="unknown lecture or page"):
+        CourseWriter(generator).synthesize(Course("course-1", "Course", tmp_path / "C.md"),
+                                            [lecture])
+    assert len(generator.prompts) == 2

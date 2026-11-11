@@ -1,17 +1,42 @@
 """Local PowerPoint export. Only temporary working copies are opened by the app."""
 from __future__ import annotations
 
+import logging
 import shutil
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from time import monotonic
 from zipfile import BadZipFile, ZipFile
 
 import pymupdf
 from defusedxml import ElementTree as ET
 
 _PRESENTATION_NS = "{http://schemas.openxmlformats.org/presentationml/2006/main}"
+logger = logging.getLogger(__name__)
+
+_OWNERSHIP_HANDLER = '''
+on ownsPresentation(candidate, inputFile, outputFile)
+    try
+        tell application "Microsoft PowerPoint"
+            set candidatePath to (get full name of candidate) as text
+        end tell
+        if candidatePath starts with "/" then
+            set candidateFile to (POSIX file candidatePath) as alias
+        else
+            set candidateFile to candidatePath as alias
+        end if
+        -- Resolve aliases in the script, not inside PowerPoint's application dictionary.
+        return candidateFile is inputFile or candidateFile is outputFile
+    on error errorMessage number errorNumber
+        log ("MYND_OWNERSHIP: " & errorNumber & ": " & errorMessage)
+        return false
+    end try
+end ownsPresentation
+'''
+
 _EXPORT_SCRIPT = '''on run argv
     set inputFile to POSIX file (item 1 of argv) as alias
     set outputFile to POSIX file (item 2 of argv) as alias
@@ -20,9 +45,12 @@ _EXPORT_SCRIPT = '''on run argv
     tell application "Microsoft PowerPoint"
         with timeout of 180 seconds
             try
+                log ("MYND_EXPORT_STAGE: " & exportStage)
                 open inputFile
-                repeat with presentationIndex from 1 to count of presentations
-                    if name of presentation presentationIndex is (item 3 of argv) then
+                log "MYND_EXPORT_STAGE: selecting staged presentation"
+                set presentationCount to count of presentations
+                repeat with presentationIndex from 1 to presentationCount
+                    if (get name of presentation presentationIndex) is (item 3 of argv) then
                         set targetPresentation to presentation presentationIndex
                         exit repeat
                     end if
@@ -32,43 +60,66 @@ _EXPORT_SCRIPT = '''on run argv
                     error "Staged presentation identity changed; refusing export"
                 end if
                 set exportStage to "exporting slide PDF"
-                save targetPresentation in outputFile as save as PDF
+                log ("MYND_EXPORT_STAGE: " & exportStage)
+                -- PowerPoint's save destination must be a file specifier, not an alias.
+                save targetPresentation in (POSIX file (item 2 of argv)) as save as PDF
             on error errorMessage number errorNumber
-                my closeOwnPresentation(inputFile, outputFile)
                 error (exportStage & ": " & errorMessage) number errorNumber
             end try
-            my closeOwnPresentation(inputFile, outputFile)
+            log "MYND_EXPORT_STAGE: export complete"
         end timeout
     end tell
 end run
+''' + _OWNERSHIP_HANDLER
 
-on ownsPresentation(candidate, inputFile, outputFile)
+# A live PowerPoint collection is not a finite AppleScript list. Snapshot its count
+# and address actual presentations by index, rather than iterating object specifiers.
+_CLEANUP_SCRIPT = '''on run argv
+    set inputFile to POSIX file (item 1 of argv) as alias
+    set outputFile to POSIX file (item 2 of argv) as alias
     tell application "Microsoft PowerPoint"
-        try
-            set candidatePath to full name of candidate
-            return candidatePath is (POSIX path of inputFile) or ¬
-                candidatePath is (inputFile as text) or ¬
-                candidatePath is (POSIX path of outputFile) or ¬
-                candidatePath is (outputFile as text)
-        on error
-            return false
-        end try
-    end tell
-end ownsPresentation
-
-on closeOwnPresentation(inputFile, outputFile)
-    tell application "Microsoft PowerPoint"
-        try
-            repeat with candidate in presentations
+        with timeout of 5 seconds
+            log "MYND_EXPORT_STAGE: closing staged presentation"
+            set presentationCount to count of presentations
+            log ("MYND_CLEANUP: checking " & presentationCount & " presentation(s)")
+            repeat with presentationIndex from presentationCount to 1 by -1
+                set candidate to presentation presentationIndex
                 if my ownsPresentation(candidate, inputFile, outputFile) then
+                    log "MYND_CLEANUP: closing verified temporary presentation"
                     close candidate saving no
-                    exit repeat
+                    return "closed staged presentation"
                 end if
             end repeat
-        end try
+            return "staged presentation is no longer open"
+        end timeout
     end tell
-end closeOwnPresentation
-'''
+end run
+''' + _OWNERSHIP_HANDLER
+
+
+def _cleanup_powerpoint(staged: Path, output: Path, debug: Callable[[str], None]) -> None:
+    """A bounded, best-effort step; it must never undo or mask the export result."""
+    started = monotonic()
+    debug("Starting separate PowerPoint cleanup: AppleEvent timeout=5s, process timeout=10s")
+    try:
+        completed = subprocess.run(
+            ["osascript", "-", str(staged), str(output)], input=_CLEANUP_SCRIPT,
+            capture_output=True, text=True, check=True, timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        stderr = _export_stderr(getattr(exc, "stderr", None))
+        debug(f"PowerPoint cleanup failed after {monotonic() - started:.2f}s: "
+              f"{type(exc).__name__}: {exc}; stderr: {stderr.strip() or '(empty)'}")
+        logger.warning(
+            "PowerPoint temporary-presentation cleanup failed; it does not invalidate an "
+            "already validated/saved PDF. Close only the temporary presentation '%s' manually "
+            "if it remains open. Other presentations were not targeted. Details: %s",
+            staged.name, exc,
+        )
+    else:
+        debug(f"PowerPoint cleanup complete in {monotonic() - started:.2f}s; "
+              f"result: {_export_stderr(completed.stdout).strip() or '(empty)'}; "
+              f"stderr: {_export_stderr(completed.stderr).strip() or '(empty)'}")
 
 
 def powerpoint_available() -> bool:
@@ -104,9 +155,22 @@ def validate_export(path: Path, expected_pages: int) -> None:
             )
 
 
-def convert_powerpoint(source: Path, destination: Path) -> Path:
+def _export_stderr(value: str | bytes | None) -> str:
+    return value.decode("utf-8", errors="replace") if isinstance(value, bytes) else value or ""
+
+
+def _last_export_stage(stderr: str) -> str:
+    stages = [line.split("MYND_EXPORT_STAGE: ", 1)[1].strip().removesuffix("*)").strip()
+              for line in stderr.splitlines() if "MYND_EXPORT_STAGE: " in line]
+    return stages[-1] if stages else "unknown (PowerPoint emitted no stage marker)"
+
+
+def convert_powerpoint(source: Path, destination: Path, *,
+                       debug: Callable[[str], None] | None = None) -> Path:
     """Export a slide-per-page PDF, with bounded execution and no shell interpolation."""
     count = pptx_slide_count(source)
+    debug = debug or (lambda _: None)
+    debug(f"PowerPoint export input: {source}; expected slides={count}; destination={destination}")
     if not powerpoint_available():
         raise ValueError(
             "Automatic PPTX conversion requires Microsoft PowerPoint and osascript on macOS. "
@@ -121,21 +185,42 @@ def convert_powerpoint(source: Path, destination: Path) -> Path:
         shutil.copy2(source, staged)
         # Existing-file aliases carry a sandbox file-access grant to the Office app.
         output.touch()
+        debug(f"Staged working copy: {staged}; temporary PDF: {output}")
+        debug("Starting osascript: AppleEvent timeout=180s, process timeout=200s")
+        started = monotonic()
         try:
-            subprocess.run(
-                ["osascript", "-", str(staged), str(output), staged.name],
-                input=_EXPORT_SCRIPT, capture_output=True, text=True, check=True, timeout=200,
-            )
-        except subprocess.TimeoutExpired as exc:
-            raise ValueError("PowerPoint PDF export timed out; check PowerPoint for dialogs") from exc
-        except subprocess.CalledProcessError as exc:
-            raise ValueError(
-                "PowerPoint PDF export failed. Open PowerPoint to finish first-run/sign-in "
-                "or file-access dialogs; check Automation access in System Settings → Privacy "
-                f"& Security. Details: {exc.stderr.strip()[:1000]}"
-            ) from exc
-        if not output.is_file() or not output.stat().st_size:
-            raise ValueError("PowerPoint reported success but did not create a PDF")
-        validate_export(output, count)
-        shutil.copy2(output, destination)
+            try:
+                completed = subprocess.run(
+                    ["osascript", "-", str(staged), str(output), staged.name],
+                    input=_EXPORT_SCRIPT, capture_output=True, text=True, check=True, timeout=200,
+                )
+            except subprocess.TimeoutExpired as exc:
+                stderr = _export_stderr(exc.stderr)
+                debug(f"PowerPoint automation timed out after {monotonic() - started:.2f}s; "
+                      f"stderr: {stderr.strip() or '(empty)'}")
+                raise ValueError(
+                    f"PowerPoint PDF export timed out after {exc.timeout}s; "
+                    f"last stage: {_last_export_stage(stderr)}. Check PowerPoint for first-run, "
+                    "sign-in, or file-access dialogs, or export this deck to PDF manually."
+                ) from exc
+            except subprocess.CalledProcessError as exc:
+                stderr = _export_stderr(exc.stderr)
+                debug(f"PowerPoint automation exit_code={exc.returncode}; "
+                      f"elapsed={monotonic() - started:.2f}s; stderr: {stderr.strip() or '(empty)'}")
+                raise ValueError(
+                    "PowerPoint PDF export failed. Open PowerPoint to finish first-run/sign-in "
+                    "or file-access dialogs; check Automation access in System Settings → Privacy "
+                    f"& Security. Last stage: {_last_export_stage(stderr)}. "
+                    f"Details: {stderr.strip()[:1000]}"
+                ) from exc
+            debug(f"PowerPoint automation complete in {monotonic() - started:.2f}s; "
+                  f"stderr: {_export_stderr(completed.stderr).strip() or '(empty)'}")
+            if not output.is_file() or not output.stat().st_size:
+                raise ValueError("PowerPoint reported success but did not create a PDF")
+            validate_export(output, count)
+            debug(f"Validated exported PDF: {count} pages, {output.stat().st_size:,} bytes")
+            shutil.copy2(output, destination)
+            debug(f"Saved converted PDF: {destination}; cleanup cannot discard this result")
+        finally:
+            _cleanup_powerpoint(staged, output, debug)
     return destination

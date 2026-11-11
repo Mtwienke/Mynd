@@ -64,15 +64,22 @@ def _questions(vault: Path, questions: tuple[StudyQuestion, ...], lectures: dict
     return "\n\n".join(result)
 
 
-def _write(path: Path, kind: str, identifier: str, title: str, blocks: dict[str, str]) -> Path:
+def _write(path: Path, kind: str, identifier: str, title: str, blocks: dict[str, str], *,
+           previous_title: str | None = None) -> Path:
     content = path.read_text(encoding="utf-8") if path.exists() else ""
+    prefix = f"---\ntype: {kind}\nwork_id: {json.dumps(identifier)}\n---\n\n"
     if not content:
-        content = (f"---\ntype: {kind}\nwork_id: {json.dumps(identifier)}\n---\n\n"
-                   f"# {_inline(title)}\n\n")
+        content = prefix + f"# {_inline(title)}\n\n"
         for key, body in blocks.items():
             content += f"<!-- mynd:{key}:begin -->\n{body}\n<!-- mynd:{key}:end -->\n\n"
         content += "## My notes\n\n_Add personal notes here; this area is never regenerated._\n"
     else:
+        # Only rename our exact untouched generated heading. Customized headings,
+        # frontmatter, personal notes, and all other unmanaged content stay intact.
+        if previous_title is not None:
+            old_header = prefix + f"# {_inline(previous_title)}\n\n"
+            if content.startswith(old_header):
+                content = prefix + f"# {_inline(title)}\n\n" + content[len(old_header):]
         for key, body in blocks.items():
             begin, end = f"<!-- mynd:{key}:begin -->", f"<!-- mynd:{key}:end -->"
             if content.count(begin) != 1 or content.count(end) != 1:
@@ -89,9 +96,10 @@ def _write(path: Path, kind: str, identifier: str, title: str, blocks: dict[str,
 
 
 def write_lecture_note(vault: Path, course: Course, lecture: Lecture, *,
-                       preserve_study: bool = False) -> Path:
+                       preserve_study: bool = False, previous_title: str | None = None) -> Path:
     lookup = {lecture.id: lecture}
-    metadata = (f"**Course:** {note_link(vault, course.note_path, course.title)}\n\n"
+    metadata = (f"**Lecture:** {_inline(lecture.title)}\n\n"
+                f"**Course:** {note_link(vault, course.note_path, course.title)}\n\n"
                 f"**Source PDF:** {note_link(vault, lecture.pdf_path)}\n\n"
                 f"**Original:** {note_link(vault, lecture.original_path)}\n\n"
                 f"**Language:** {_inline(lecture.language) or 'Unknown'} · "
@@ -120,15 +128,17 @@ def write_lecture_note(vault: Path, course: Course, lecture: Lecture, *,
         blocks["questions"] = "## Extracted questions\n\n" + _questions(
             vault, lecture.questions, lookup)
         blocks = {key: blocks[key] for key in ("metadata", "summary", "questions", "quality")}
-    return _write(lecture.note_path, "lecture", lecture.id, lecture.title, blocks)
+    return _write(lecture.note_path, "lecture", lecture.id, lecture.title, blocks,
+                  previous_title=previous_title)
 
 
 def write_course_note(vault: Path, course: Course, lectures: list[Lecture], *,
-                      preserve_study: bool = False) -> Path:
+                      preserve_study: bool = False, previous_title: str | None = None) -> Path:
     lookup = {lecture.id: lecture for lecture in lectures}
     ready = sum(bool(lecture.sections) for lecture in lectures)
     languages = sorted({lecture.language for lecture in lectures if lecture.language})
     metadata = "\n".join(f"- **{label}:** {_inline(value) or 'Unknown'}" for label, value in (
+        ("Course", course.title),
         ("University", course.university), ("Semester", course.semester),
         ("Lecturer", course.lecturer), ("Output language", course.language),
     ))
@@ -160,4 +170,5 @@ def write_course_note(vault: Path, course: Course, lectures: list[Lecture], *,
         blocks = {key: blocks[key] for key in (
             "metadata", "coverage", "summary", "lectures", "questions",
         )}
-    return _write(course.note_path, "course", course.id, course.title, blocks)
+    return _write(course.note_path, "course", course.id, course.title, blocks,
+                  previous_title=previous_title)
