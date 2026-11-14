@@ -380,7 +380,43 @@ mynd connect --non-interactive --json  # New topics remain pending; approved top
 mynd connect --dry-run --offline       # Preview without note or maintenance-state writes
 mynd connect --review                  # Also reconsider previously rejected proposals
 mynd connect --all                     # Force full rediscovery and mention verification
+mynd connect --verbose                 # Or -v: Ollama/runtime diagnostics in the current topic context
 ```
+
+### Connect progress and diagnostics
+
+Normal output identifies the current phase, **percentage of completed units within
+that phase**, and the note/topic being processed. The eight phases are scanning,
+discovery, grouping, breadth/evidence assessment, review, topic updates, source-note
+connections, and journaled writes. For example:
+
+```text
+[Connect 2/8 | Discovery 35% (5/14 notes)] 10 Papers/Example.md — Discover topics [passage batch 1/3]: local model request 1/2
+[Connect 4/8 | Candidate evidence 37% (64/172 topics)] LoRA — Verify LoRA: 3 passages from 3 note(s): ...
+[Connect 6/8 | Update topics 25% (1/4 topics)] Large Language Models → 20 Topics/... — Synthesizing vault topic from 7 supporting passage(s)
+```
+
+These are **work counters, not elapsed-time/ETA or model-token percentages**: one
+model request may take much longer than a cached item. The in-flight item does not
+advance the completed count until it finishes. Assessment and broader-topic passes
+have separate, explicitly named counters because their totals become known later.
+Failed/deferred items count as processed, not successful; their retry/hold status is
+printed and remains in the final report. Interrupted phases do not claim completion.
+
+Grouping shows candidate titles and split/retry context. Evidence checks identify
+the topic and input notes; synthesis identifies reduction passes and batches.
+Cache reuse, eligibility counts, legacy holds, review pauses, web research, and
+unchanged output are distinguished. Fast scanning/linking progress is throttled
+to avoid printing a line for every skipped file. Write progress advances only
+after each changed file has a durable recovery-journal checkpoint. Dry runs
+explicitly report previews rather than claiming to have written files.
+
+`mynd connect --verbose` (or `-v`) adds the same local-model diagnostics as ingestion:
+Ollama options, timings, token counts/rates, runtime allocation, and applicable
+thermal diagnostics. These messages inherit the current note/topic context.
+Prompts and source bodies are not logged by progress/diagnostics. Progress goes to
+**stderr**, so `--json` stdout remains machine-readable. Changes to progress output
+apply to the next invocation, not a process that is already running.
 
 The first run examines substantive paper, lecture, and handwritten Markdown notes.
 Citation placeholders, bibliographies, template text, extracted questions, and
