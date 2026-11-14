@@ -19,6 +19,9 @@ The installable code lives under `src/` and is split by responsibility:
 | `mynd.ai` | Local Ollama backend, runtime controls, and summarization |
 | `mynd.questionnize` | Study questions generated from a paper's summary |
 | `mynd.courses` | Reviewed university-slide ingestion and local PowerPoint conversion |
+| `mynd.clean` | Incremental Markdown/link inspection and conservative mechanical repairs |
+| `mynd.connect` | Reviewed topic discovery, connections, and optional web enrichment |
+| `mynd.years` | Reversible publication-year organization and link migration |
 
 Every domain package is nested under the `mynd` distribution package, so a
 normal install exposes only `mynd` as a top-level import.
@@ -266,6 +269,316 @@ mynd questionnize doi-abcdef123456
 mynd questionnize 10.1234/study
 ```
 
+## Publication years and chronology
+
+Papers and citation placeholders link to real publication-year notes, organized
+under a **`Years/`** folder:
+
+```text
+Years/
+├── 80s/year-1988.md
+├── 90s/year-1995.md
+├── 00s/year-2003.md
+├── 10s/year-2016.md
+└── 20s/year-2023.md
+```
+
+Notes display a short year through an explicit, vault-relative link:
+`[[Years/20s/year-2023|2023]]`. One hub is created per distinct known publication
+year, not per paper. New hubs have `type: year`, a numeric `year` and `decade`, and
+the tag `mynd/year`. Existing year-note content and custom metadata are preserved.
+Ingestion automatically creates missing hubs for both paper dates and reference
+dates; it never regenerates or overwrites your personal chronology in a year note.
+Course semester labels and ingestion timestamps are not assumed to be publication years.
+
+To organize an existing vault:
+
+```bash
+mynd years                    # Read-only preview; no model, network, or state writes
+mynd years --json             # Full preview, including proposed date corrections
+mynd years --apply            # Create/move year notes and migrate their links
+```
+
+This migrates the old `[[2023]]` links, links plain publication-year metadata lines,
+and moves unambiguous existing year notes to the appropriate folder. Wiki/Markdown
+destinations, quoted YAML property links, and Canvas file-card paths follow moved
+notes; outgoing relative Markdown links in a moved year note are rebased. Labels,
+anchors, Markdown link titles, meaningful whitespace, source dumps, and personal
+sections remain intact. Conflicting duplicate year notes or occupied destinations
+cause a safe refusal rather than a merge/overwrite. Dotfolders, symlinks, and configured
+maintenance exclusions remain protected. Rerunning a completed migration is a no-op.
+
+Abbreviations are fixed and century-safe: decades **1950–2049** use `50s` through
+`40s`; all other decades use their full name, e.g. `1890s` and `1910s`. This prevents
+1911 and 2011 from being mixed into one `10s` folder and avoids date-dependent
+folder renaming as time passes.
+
+Reference-date extraction ignores DOI/arXiv identifiers, URLs, and labeled issue/
+volume/page numbers. Migration corrects a previous identifier-as-year mistake only
+when the retained source citation establishes a replacement and the note still
+matches the old generated metadata/field pair. Raw GROBID evidence is not altered;
+manual date overrides survive. Missing or ambiguous dates are not guessed, and
+implausible future dates are reported rather than turned into year hubs.
+
+In Obsidian Graph view, hide the chronology hubs using **Search files**:
+
+```text
+-path:"Years/"
+```
+
+Alternatively use `-file:year-` or `-tag:#mynd/year`. To color chronology nodes,
+create a graph Group using `path:"Years/"`. Year hubs expose chronological clusters,
+but Obsidian's force-directed graph does not enforce a chronological axis.
+Year/decade nodes are excluded from AI topic discovery.
+
+Year migrations use the same snapshots and recovery journal as cleanup/connection
+runs. The printed backup ID can be restored with `mynd clean --restore RUN_ID`,
+including moves, provided none of the affected files were edited afterwards.
+
+## Vault cleanup and topic connections
+
+These are **independent commands**. Ingestion does not automatically run either
+one; their service functions can be used by a future ingestion coordinator.
+Run them from the project directory, or pass `--config /path/to/config.toml`.
+
+### Clean
+
+```bash
+mynd clean                     # Inspect changed notes; no note changes
+mynd clean --all               # Recheck everything, bypassing cached diagnostics
+mynd clean --apply             # Apply only unambiguous mechanical repairs
+mynd clean --json              # Full report, including unresolved links
+```
+
+Cleanup inspects every non-excluded Markdown file, including citation
+placeholders. It repairs known escaped paper-summary headings, recognizable
+imported JATS abstracts, and uniquely identifiable stale/case-mismatched link
+destinations. Link labels, optional Markdown link titles, meaningful whitespace,
+personal text, code, math, and existing note names are retained. Paper generation
+now renders actual nested summary headings rather than literal `\## Overview`.
+
+Ambiguous targets, missing headings/blocks, malformed YAML/links/fences,
+suspicious emphasis/table formatting, and damaged ownership markers are reported,
+**not guessed or rewritten**. Missing year notes such as `[[2023]]` are unresolved
+links, not syntax errors; cleanup never creates or deletes notes to satisfy them.
+Use `mynd years --apply` to migrate these links to real, filterable year hubs.
+Capitalization-only mismatches are distinguished from missing files. Links in
+checksummed generated sections are updated by `connect`, not patched behind its back.
+
+Diagnostics are cached against file contents, parser version, and the vault's
+link/heading/block inventory. Target renames and heading changes invalidate inbound
+diagnostics even when the referring note did not change. An exit code of **1**
+indicates skipped files, review findings, or unapplied repairs; unresolved links
+alone do not fail the command.
+
+### Connect
+
+```bash
+mynd connect --offline                 # Discover, review, synthesize, and link locally
+mynd connect --mode silent --verbose   # Existing local inference/thermal controls
+mynd connect --non-interactive --json  # New topics remain pending; approved topics may update
+mynd connect --dry-run --offline       # Preview without note or maintenance-state writes
+mynd connect --review                  # Also reconsider previously rejected proposals
+mynd connect --all                     # Force full rediscovery and mention verification
+```
+
+The first run examines substantive paper, lecture, and handwritten Markdown notes.
+Citation placeholders, bibliographies, template text, extracted questions, and
+generated topic sections are not discovery evidence. Course overviews can receive
+connections, but do not count as independent supporting notes. Original PDFs and
+unrendered slide text are **not** analyzed by this command.
+
+New nodes are breadth-gated, not selected merely because the model calls a
+single-note concept important:
+
+| Breadth | Minimum original sources | Calibration examples |
+| --- | ---: | --- |
+| `umbrella` | **1** | Artificial Intelligence, Evolutionary Algorithms, Large Language Models |
+| `established` | **2** | Reinforcement Learning, CNNs, PINNs, Self-attention |
+| `specialized` | **3** | LoRA, AdamW, particular optimization techniques |
+| `niche` | **5** | Paper-specific architectures and narrowly defined variants |
+
+Only **substantive discussion** counts: explanation, application, comparison, or
+meaningful discussion—not a passing name-drop. Eligible candidates are contextually
+verified against actual passages **before** reaching review. The source threshold
+is checked again before creating a topic file. Importance never bypasses these
+hard floors. Named model families (GPT, Llama, BERT, etc.), datasets, benchmarks,
+people, publication titles, venues, years, generic headings, and other metadata are
+excluded regardless of source count. General architectures/methods, tools/software,
+and paper-specific inventions remain eligible at the appropriate breadth.
+
+Count each original paper, lecture, or personal note once. Multiple passages,
+summaries, and excerpts of one work do not add independent support. DOI identity is
+case-insensitive; generated paper/lecture notes use their stable work IDs. For
+handwritten derived notes, declare `source_work_id: "paper-..."` or
+`derived_from: "[[Path/Original note]]"` in frontmatter. Multiple derivatives can
+then link normally but count as one original. Multi-source summaries without
+passage-level attribution and course overviews add no independent support. Mynd
+does not guess that an arbitrary citation makes a personal note a derivative.
+
+The local model may suggest a nearest broader concept for a narrow candidate.
+That relationship alone is **not** evidence: the source must substantively support
+the broader topic in context. For example, LoRA can remain a candidate while the
+source connects to an approved Large Language Models node. Broader concepts are
+not synonyms/aliases of their narrow children. Both broad and specific connections
+are retained when substantively supported; no automatic parent hierarchy is added.
+
+Only eligible topics require terminal review: approve, edit their English title/
+definition/aliases/public search query, correct their **[b]readth**, merge into a
+policy-approved topic, reject, defer, or explicitly adopt a handwritten topic note.
+The classification explanation, original-source count/threshold, and supporting
+excerpts are shown before approval. Editing a title/definition rechecks entity type
+and evidence; adoption cannot bypass the floor. Adoption preserves existing text
+and appends a generated section. Noninteractive runs never approve new topics and
+return **1** while eligible proposals are pending. Rejections are remembered until
+evidence changes or `--review` reopens them.
+
+### Saved topic candidates
+
+Below-threshold concepts do **not** create vault nodes, source links to premature
+concepts, or terminal approval prompts. They are retained in SQLite and a readable
+Markdown register outside the Obsidian vault:
+
+```text
+<data_path>/maintenance/<vault-id>/topic-candidates.md
+```
+
+The register lists candidate IDs, aliases, definitions, breadth explanations,
+entity kinds, current original-source counts, missing support, and source excerpts.
+Excluded and eligible candidates are also visible for auditing. Removed evidence
+does not keep contributing to counts; inactive concepts remain recorded for later
+rediscovery. A subsequent normal `mynd connect` automatically offers review when
+a saved candidate gains enough support. Waiting/excluded candidates alone do not
+cause a failure exit. The register path and counts are printed; `--json` includes
+all candidate records. `--dry-run` previews these records without writing the
+register or database.
+
+To correct a below-threshold candidate's inaccurate breadth classification without
+having every candidate interrupt review, use its saved ID:
+
+```bash
+mynd connect --reclassify concept-EXAMPLE=umbrella
+# Valid categories: umbrella, established, specialized, niche; the option is repeatable.
+```
+
+This is a recorded human classification correction, not a count override. The new
+category's threshold still applies, and excluded entity types remain excluded.
+Keep personal comments outside the register's managed block; edits inside that
+checksummed block cause a safe refusal rather than an overwrite.
+
+Older saved approvals are retained but cannot automatically create files under
+the new policy. Eligible legacy concepts require renewed review and reuse their
+existing topic ID/path when bound to that approval. Below-threshold legacy concepts
+remain candidates. Existing legacy files are preserved, not automatically deleted,
+merged, or migrated; outstanding legacy approvals are listed in the JSON report.
+
+Approved topics live under `20 Topics/` by default, with stable IDs and filenames.
+They contain an **AI-generated synthesis from vault notes**, claim/paragraph-level
+note citations, supporting excerpts, a list of mentions, optional web overview,
+and a personal **My notes** area. Synthesis targets about 200–500 words when
+supported; thin evidence is not padded. Citation validation checks source identity,
+not whether an interpretation is correct. Verify important claims yourself.
+
+Each mentioning note receives a managed **Related topics** list and a wikilink at
+its first suitable prose mention. Headings, quotations, code, math, URLs, tables,
+and existing links are not inline-rewritten. Newly approved topics also search
+older, unchanged notes for relevant mentions. Contextual verification distinguishes
+different senses of a term rather than blindly linking every keyword match.
+
+Later runs reuse cached extraction, decisions, matches, and summaries. An unchanged,
+completed run makes no model calls, web requests, or note writes (unless a web cache
+has expired). Failures remain retryable; `--all` forces a fresh local pass. Renames
+reuse work IDs, or an unambiguous disappeared-file fingerprint for handwritten
+notes. If a rename and content change cannot be identified, the file is treated as
+a new note. Deleted/changed evidence updates affected topics; topic files and
+personal notes are never automatically deleted. Syntax/ownership problems defer
+affected updates rather than overwriting damaged notes.
+
+Discovery and grouping are checkpointed separately. Grouping uses required short-ID
+assignments; Python constructs and validates complete partitions. Each successful
+batch is saved immediately, so an interruption does not discard earlier work.
+Malformed responses receive one repair attempt, then at most two levels of batch
+subdivision. Completed children are reused on the next run; only unfinished leaves
+are retried. Model/transport outages stop further uncached grouping requests rather
+than triggering subdivision. Successful cached batches remain usable.
+
+If grouping still fails, candidates are retained **unmerged**, with a warning in
+eligible review proposals and batch/candidate diagnostics in `--json`. Other batches
+can still reach review. No fallback approves a new topic automatically, and unresolved
+grouping returns **1** even if useful work completes. Rerun `mynd connect` normally
+to resume; do **not** use `--all` just to recover from a grouping error. Grouping
+schema upgrades do not invalidate note discovery. Newly approved topics do not
+invalidate every grouping batch; existing-topic bindings are checked for deletion
+or changed meaning. Progress identifies discovery notes, passage batches, and
+grouping batches (including cached work).
+Breadth/entity assessments and verified candidate evidence have separate caches;
+the new policy does not invalidate completed discovery. Failed assessments or
+evidence checks leave candidates pending, never implicitly eligible.
+
+### Optional free-tier web overview
+
+Mynd uses [Ollama's hosted search/fetch API](https://docs.ollama.com/capabilities/web-search),
+which currently has a [free tier](https://ollama.com/blog/web-search). No additional
+server, hosted model, or Ollama Python SDK is needed. Free-tier limits can change;
+there is no paid fallback.
+
+```bash
+export OLLAMA_API_KEY="your-key"   # Create a free account/key at ollama.com/settings/keys
+mynd connect --web
+mynd connect --web --refresh-web  # Explicitly refresh cached sources
+```
+
+Only approved topic queries and selected public URLs go to Ollama's hosted API,
+**not vault text**. Retrieved page content is summarized by your local model. The
+short overview is labeled **AI generated**, cites fetched sources, and records its
+retrieval date. Search snippets alone are not presented as inspected pages. The
+default cache lifetime is 30 days. On network/quota/key failure the supported local
+topic can still be written; prior valid web content is retained with a notice and
+the command returns **1**. A later run retries the failed stage. `--offline` makes
+no web requests and retains an already-generated web section.
+
+Configuration defaults in `config.toml`:
+
+```toml
+topics_folder = "20 Topics"
+maintenance_excludes = []       # e.g. ["Private/**", "Archive/**"]
+topic_web_enabled = false      # Opt in here, or per run with --web
+topic_web_cache_days = 30
+```
+
+Dotfolders (including `.obsidian`/`.trash`) and symlinks are excluded. Exclusions
+apply to both commands. Keep `data_path` outside the actual Obsidian vault so that
+backups do not become duplicate graph nodes. Keep API keys in the environment,
+never in notes or configuration. For a dry run, select a resource profile beforehand
+with `mynd mode silent` instead of combining `--mode` with `--dry-run`.
+
+### Preservation and recovery
+
+Maintenance patches are backed up under
+`<data_path>/maintenance/<vault-id>/<run-id>/`. Every writing run prints its ID.
+The journal and original file contents are saved before edits; files are replaced
+atomically and checked for concurrent edits. Maintenance commands use a per-vault
+lock. An interrupted writing run can be recovered using its journal directory's ID:
+
+```bash
+mynd clean --restore RUN_ID
+```
+
+Recovery refuses to overwrite a file edited after the run. It removes a newly
+created topic only if that file still matches the run's exact postimage. Recovery
+restores files, **not topic approvals or cached analysis**; a subsequent `connect`
+can recreate approved output. Backups contain local note content and should be
+protected like the vault itself.
+
+Related-topic sections, generated topic content, and inserted inline links carry
+ownership/checksum markers. Do not remove those markers. Manual changes to owned
+content cause a safe refusal; place personal edits outside generated blocks.
+Paper/course refreshes preserve connector sections and reapply inline links only
+when their evidence passage is unchanged. Changed passages lose the generated
+inline link and receive a stale-connections notice until `connect` rechecks them.
+Paper refreshes also retain custom chapters, frontmatter properties, and reading
+status rather than rebuilding the whole note.
+
 ## Inference modes and thermal response
 
 Choose a reduced-resource profile when starting ingestion:
@@ -311,3 +624,9 @@ Keep that process running, then ingest PDFs. If GROBID is unavailable, the PDF a
 ## Privacy
 
 PDFs, extracted text, and SQLite data are stored locally. Crossref receives DOI lookup requests, and a locally run GROBID service receives the PDF for bibliography extraction. Extracted paper text (excluding a terminal bibliography) is sent to the configured Ollama model on your machine for summarization and reference annotation. Slide text and retained evidence are likewise sent only to local Ollama; course slides bypass Crossref and GROBID entirely. PPTX conversion is performed by the installed local PowerPoint application. Course state/text/conversion caches remain under `data_path`, SQLite course records use `database_path`, and managed slide sources live inside the Obsidian vault. Mynd has no hosted-model backend: summarization always runs locally, and unavailable models leave generation incomplete for a later retry.
+
+Vault maintenance stores passage/analysis caches and approvals in the local SQLite
+database, with note snapshots/journals under `data_path`. Topic discovery and all
+synthesis run locally. Optional `connect --web` sends only approved topic queries
+and selected URLs to Ollama's hosted search/fetch service; those queries can reveal
+your interests or private topic names. Web access is disabled by default.
