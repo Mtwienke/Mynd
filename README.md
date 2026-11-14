@@ -469,6 +469,15 @@ and appends a generated section. Noninteractive runs never approve new topics an
 return **1** while eligible proposals are pending. Rejections are remembered until
 evidence changes or `--review` reopens them.
 
+The merge picker starts at the proposal's current breadth. Choose **other breadth**
+(`o`) to browse `umbrella`, `established`, `specialized`, or `niche` targets by name
+or number; each breadth shows its count of approved topics. You can switch breadths
+repeatedly, including from an empty category. Both the topic picker and the breadth
+chooser offer **exit** (`x`, or Enter), which cancels merging and returns to the
+proposal without losing edits or ending the run. Main-review `q` still quits the
+run explicitly. Browsing target breadths does not reclassify the proposal or target;
+only already policy-approved topics are merge targets, not pending candidates.
+
 ### Saved topic candidates
 
 Below-threshold concepts do **not** create vault nodes, source links to premature

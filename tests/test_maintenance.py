@@ -7,10 +7,12 @@ from unittest.mock import patch
 import pytest
 from typer.testing import CliRunner
 
+from mynd.ai.topic_policy import POLICY_VERSION
 from mynd.ai.topics import InvalidModelOutput
 from mynd.clean import clean_vault
 from mynd.cli import app
 from mynd.connect import Decision, connect_vault
+from mynd.connect.review import review_topic
 from mynd.settings import Settings
 from mynd.storage.maintenance import MaintenanceStore
 from mynd.vault.connections import connect_note, preserve_connections
@@ -592,6 +594,31 @@ def test_merge_review_reuses_topic_identity_and_does_not_create_duplicate_node(s
     result = connect_vault(settings, writer, reviewer=lambda *_: Decision("merge", topic_id=existing_id))
     assert len(result["topics"]) == 1
     assert result["topics"][0]["id"] == existing_id
+    assert len(list((settings.vault_path / settings.topics_folder).glob("*.md"))) == 1
+
+
+def test_interactive_merge_can_select_an_established_target_from_an_umbrella_proposal(settings, monkeypatch):
+    note(settings, "one.md", "# One\n\nSelf-attention weights tokens based on relevance.")
+    note(settings, "two.md", "# Two\n\nSelf-attention provides contextual token representations.")
+    existing = {"id": "topic-established", "title": "Self-attention", "definition": "Contextual attention.",
+                "aliases": ["self-attention"], "breadth": "established", "kind": "concept",
+                "policy_version": POLICY_VERSION, "query": "Self-attention overview",
+                "path": "20 Topics/Existing attention.md", "adopted": False}
+    store = MaintenanceStore(settings)
+    store.put("topics", existing["id"], existing)
+    store.save()
+    writer = FakeWriter()
+    def group(candidates, known):
+        writer.called("consolidate")
+        return [{"title": "Contextual attention", "definition": candidates[0]["definition"],
+                 "aliases": ["self-attention"], "members": [c["id"] for c in candidates], "topic_id": ""}]
+    writer.consolidate = group
+    answers = iter(["m", "other breadth", "established", "1"])
+    monkeypatch.setattr("mynd.connect.review.typer.prompt", lambda *args, **kwargs: next(answers))
+    result = connect_vault(settings, writer, reviewer=review_topic)
+    assert result["status"] == "complete" and len(result["topics"]) == 1
+    assert result["topics"][0]["id"] == existing["id"]
+    assert MaintenanceStore(settings).get("topics", existing["id"])["breadth"] == "established"
     assert len(list((settings.vault_path / settings.topics_folder).glob("*.md"))) == 1
 
 
