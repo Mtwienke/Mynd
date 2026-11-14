@@ -144,6 +144,41 @@ def test_approved_broader_fallback_links_source_without_narrow_node_or_false_ali
     assert result["candidate_register"]["counts"] == {"approved": 1, "waiting": 1}
 
 
+def test_broad_connections_survive_when_the_specific_candidate_later_qualifies(settings):
+    source = note(settings, 0)
+    writer = Writer(broader=True)
+    approve = lambda *_: Decision("approve")
+    connect_vault(settings, writer, reviewer=approve)
+    note(settings, 1)
+    note(settings, 2)
+    result = connect_vault(settings, writer, reviewer=approve)
+    assert result["status"] == "complete" and len(result["topics"]) == 2
+    text = source.read_text()
+    assert "Large Language Models" in text and "|LoRA]]" in text
+    assert result["candidate_register"]["counts"] == {"approved": 2}
+    writer.fail = True
+    assert connect_vault(settings, writer)["changed"] == 0
+
+
+def test_failed_policy_refresh_does_not_withdraw_a_supported_broad_topic(settings):
+    source = note(settings, 0)
+    writer = Writer(broader=True)
+    first = connect_vault(settings, writer, reviewer=lambda *_: Decision("approve"))
+    path = settings.vault_path / first["topics"][0]["path"]
+    assert "A supported conceptual overview." in path.read_text()
+    # A policy-model upgrade makes assessment cold, but the prior approval and
+    # supported content must survive an unavailable local model.
+    writer.version = "new-policy-model"
+    def unavailable(_):
+        raise RuntimeError("Model unavailable")
+    writer.classify = unavailable
+    result = connect_vault(settings, writer)
+    assert result["status"] == "partial"
+    assert "A supported conceptual overview." in path.read_text()
+    assert "No substantive supporting passages remain" not in path.read_text()
+    assert "Large Language Models" in source.read_text()
+
+
 def test_derived_notes_and_multiple_passages_do_not_inflate_independent_support(settings):
     note(settings, 0, metadata="work_id: paper-one\n")
     note(settings, 1, metadata='derived_from: "[[source-0]]"\n')
@@ -166,6 +201,33 @@ def test_review_cannot_raise_specificity_and_approve_below_new_threshold(setting
         connect_vault(settings, Writer("umbrella"), reviewer=lambda *_: Decision("approve", breadth="niche"))
     assert not MaintenanceStore(settings).items("topics")
     assert not (settings.vault_path / settings.topics_folder).exists()
+
+
+def test_editing_a_topic_title_cannot_create_an_excluded_entity(settings):
+    note(settings, 0)
+    writer = Writer("umbrella")
+    classify = writer.classify
+    def identify(topics):
+        results = classify(topics)
+        for topic in topics:
+            if topic["title"] == "BERT":
+                results[topic["id"]]["kind"] = "model_family"
+        return results
+    writer.classify = identify
+    with pytest.raises(ValueError, match="excluded entity type"):
+        connect_vault(settings, writer, reviewer=lambda *_: Decision("approve", title="BERT"))
+    assert not MaintenanceStore(settings).items("topics")
+
+
+def test_review_breadth_ui_blocks_ordinary_approval_below_threshold(settings, monkeypatch):
+    from mynd.connect.models import Proposal
+    from mynd.connect.review import review_topic
+    answers = iter(["b", "niche", "a", "s"])
+    monkeypatch.setattr("mynd.connect.review.typer.prompt", lambda *args, **kwargs: next(answers))
+    proposal = Proposal("proposal-test", "A broad subject", "Definition", (), (), False, "Reason",
+                        breadth="umbrella", source_count=1, minimum_sources=1)
+    decision = review_topic(proposal, [])
+    assert decision.action == "defer" and decision.breadth == "niche"
 
 
 def test_explicit_reclassification_changes_breadth_but_cannot_override_exclusion(settings):

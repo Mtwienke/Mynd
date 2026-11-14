@@ -86,3 +86,12 @@ def test_multisource_summaries_and_circular_provenance_do_not_manufacture_suppor
              "b": original("B.md", derived_from="[[A]]"),
              "summary": original("Summary.md", derived_from=["[[One]]", "[[Two]]"])}
     assert all(value is None for value in source_identities(notes).values())
+
+
+def test_derived_wikilink_basenames_resolve_only_when_unambiguous():
+    notes = {"paper": original("Papers/Original.md", work_id="paper-one"),
+             "summary": original("Notes/Summary.md", derived_from="[[Original]]")}
+    identities = source_identities(notes)
+    assert identities["summary"] == identities["paper"]
+    notes["another"] = original("Other/Original.md", work_id="paper-two")
+    assert source_identities(notes)["summary"] is None

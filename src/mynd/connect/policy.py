@@ -141,6 +141,12 @@ def prepare_candidates(writer, groups, candidates, catalog, notes, store, errors
 
     def evaluate(entry, *, contextual=False):
         nonlocal evidence_unavailable
+        # Approval belongs to the concept, not to an exact set of source IDs.
+        # In particular, adding support to a broader fallback must not duplicate
+        # its already-approved topic or withdraw its earlier source connections.
+        saved = store.get("topic-candidates", entry["id"], {})
+        if saved.get("topic_id") in store.items("topics"):
+            entry["topic_id"] = saved["topic_id"]
         assessment = entry.get("assessment")
         entry.update(status="assessment_pending", source_count=support_count(entry["support"], catalog, identities),
                      minimum_sources=None, breadth="unknown", kind="unknown", reason="Assessment pending")
@@ -170,12 +176,13 @@ def prepare_candidates(writer, groups, candidates, catalog, notes, store, errors
 
     for entry in entries:
         evaluate(entry)
-    # One nonrecursive broader fallback per suppressed candidate. It is NOT an
-    # alias/synonym merge: the narrow candidate remains separately in the register.
+    # One nonrecursive broader suggestion per concept. Preserve a supported broad
+    # connection when its narrow child later qualifies too; no automatic hierarchy
+    # or alias/synonym merge is introduced.
     by_title = {normalized(entry["title"]): entry for entry in entries}
     broader_entries, reconsider = [], {}
     for entry in entries:
-        if entry["status"] not in {"waiting", "excluded"} or entry.get("assessment", {}).get("kind") == "metadata":
+        if entry["status"] not in {"waiting", "excluded", "eligible"} or entry.get("assessment", {}).get("kind") == "metadata":
             continue
         for parent in entry.get("assessment", {}).get("broader", []):
             title = normalized(parent["title"])
@@ -236,6 +243,7 @@ def save_candidates(settings, store, entries, catalog, *, persist=False):
         record = {key: entry.get(key) for key in (
             "id", "title", "definition", "aliases", "breadth", "kind", "reason", "status",
             "source_count", "minimum_sources", "origin_candidates", "grouping_warning",
+            "topic_id",
         )}
         store.put("topic-candidates", entry["id"], record | {"evidence": evidence, "policy_version": POLICY_VERSION})
     path = candidate_register_path(settings)

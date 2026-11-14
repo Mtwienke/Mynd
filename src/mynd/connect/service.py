@@ -203,6 +203,7 @@ def _review_groups(settings, store, groups, catalog, notes, reviewer, reopen, pe
                 group["status"] = "rejected"
         if topic_id:
             group["status"] = "approved"
+            group["topic_id"] = topic_id
             topic = topics[topic_id]
             aliases = list(dict.fromkeys([*topic["aliases"], group["title"], *group["aliases"]]))[:24]
             if aliases != topic["aliases"]:
@@ -309,6 +310,10 @@ def connect_vault(settings: Settings, writer: TopicWriter, *, reviewer: Reviewer
         assignments = {key: [] for key in notes}
         topic_results = []
         legacy_approvals = []
+        policy_holds = {entry["topic_id"]: entry["status"] for entry in policy_groups
+                        if entry.get("topic_id") and entry["status"] in {
+                            "assessment_pending", "evidence_pending", "excluded",
+                        }}
         own_web_client = web_client is None
         web_client = web_client or OllamaWeb()
         enabled = settings.topic_web_enabled if web_enabled is None else web_enabled
@@ -335,16 +340,19 @@ def connect_vault(settings: Settings, writer: TopicWriter, *, reviewer: Reviewer
                 try:
                     topic_path = settings.vault_path / topic["path"]
                     previous_content = read_text(topic_path) if topic_path.exists() else None
+                    if topic_id in policy_holds:
+                        raise ValueError("Topic policy/evidence refresh requires attention: " + policy_holds[topic_id])
                     if previous_content:
                         validate_markers(previous_content)
                     output = store.get("topic-output", topic_id, {})
                     unreadable = {item["path"] for item in errors
-                                  if item.get("stage") == "scan" and item.get("path")}
+                                   if item.get("stage") in {"scan", "discovery"} and item.get("path")}
                     if any(path in unreadable for path in output.get("source_notes", {}).values()):
                         raise ValueError("A supporting note could not be read safely; topic update deferred")
                     names = [topic["title"], *topic["aliases"]]
+                    prior_sources = {item["source"] for item in store.get("matches", topic_id, {}).get("mentions", [])}
                     relevant = [source for source in catalog.values()
-                                if source.id in seeds.get(topic_id, set()) or any(
+                                if source.id in seeds.get(topic_id, set()) or source.id in prior_sources or any(
                                     name and re.search(term_pattern(name), source.text, re.IGNORECASE)
                                     for name in names)]
                     match_fingerprint = _fingerprint([

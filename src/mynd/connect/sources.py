@@ -2,16 +2,19 @@
 from __future__ import annotations
 
 import re
+from pathlib import PurePosixPath
 
 from mynd.resolution.doi import normalize_doi
 from mynd.vault.markdown import normalized
 
 
 def source_identities(notes: dict) -> dict[str, str | None]:
-    paths, works = {}, {}
+    paths, works, basenames = {}, {}, {}
     for identifier, (doc, _) in notes.items():
         paths[normalized(doc.relative)] = identifier
         paths[normalized(doc.relative.removesuffix(".md"))] = identifier
+        for name in (PurePosixPath(doc.relative).name, PurePosixPath(doc.relative).stem):
+            basenames.setdefault(normalized(name), set()).add(identifier)
         if doc.metadata.get("work_id"):
             works[doc.metadata["work_id"]] = identifier
     result = {}
@@ -39,7 +42,14 @@ def source_identities(notes: dict) -> dict[str, str | None]:
                     return None
                 value = re.sub(r"^\[\[|\]\]$", "", value).split("|", 1)[0].split("#", 1)[0]
                 target = paths.get(normalized(value)) or works.get(value)
-                root = resolve(target, visiting | {identifier}) if target else "source:" + normalized(value)
+                if not target and "/" not in value:
+                    matches = basenames.get(normalized(value), set())
+                    if len(matches) > 1:
+                        return None  # An ambiguous Obsidian basename is not provenance.
+                    if matches:
+                        target = next(iter(matches))
+                root = (resolve(target, visiting | {identifier}) if target
+                        else "source:" + normalized(value).removesuffix(".md"))
                 if root is None:
                     return None
                 roots.add(root)
