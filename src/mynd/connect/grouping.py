@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 import httpx
 
 from mynd.ai.topics import CONSOLIDATION_VERSION, InvalidModelOutput, consolidation_batches
+from mynd.connect.progress import names, progress_for
 from mynd.storage.maintenance import MaintenanceStore
 from mynd.vault.markdown import normalized
 from mynd.vault.safety import digest
@@ -94,7 +95,7 @@ def consolidate_topics(writer, candidates: list[dict], topics: list[dict], store
     by_id = {item["id"]: item for item in candidates}
     parts = consolidation_batches(candidates)
     result.stats["batches"] = len(parts)
-    progress = getattr(writer, "progress", lambda _: None)
+    progress = progress_for(writer)
     backend_error = None
 
     def checkpoint(key, value):
@@ -115,6 +116,8 @@ def consolidate_topics(writer, candidates: list[dict], topics: list[dict], store
 
     def process(batch, label, depth=0):
         nonlocal backend_error
+        context = label + ": " + names(item["title"] for item in batch)
+        progress.focus(context)
         key = _fingerprint([CONSOLIDATION_VERSION, writer.version, batch])
         previous = store.get("group-batches", key, {})
         if not isinstance(previous, dict):
@@ -158,6 +161,7 @@ def consolidate_topics(writer, candidates: list[dict], topics: list[dict], store
             left, left_ok = process(batch[:middle], label + ".1", depth + 1)
             right, right_ok = process(batch[middle:], label + ".2", depth + 1)
             groups = left + right
+            progress.focus(context)
             if not left_ok or not right_ok:
                 return groups, False
         bindings = {group["topic_id"] for group in groups if group["topic_id"]}
@@ -165,7 +169,8 @@ def consolidate_topics(writer, candidates: list[dict], topics: list[dict], store
                          "bindings": {identifier: _binding(known[identifier]) for identifier in bindings}})
         return groups, True
 
-    for index, batch in enumerate(parts, 1):
+    for index, batch in progress.track(3, "Grouping", parts, "batches",
+                                       lambda batch: names(item["title"] for item in batch)):
         groups, complete = process(batch, f"Grouping batch {index}/{len(parts)}")
         result.groups.extend(groups)
         result.stats["completed_batches"] += int(complete)

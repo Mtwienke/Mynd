@@ -10,6 +10,7 @@ import httpx
 
 from mynd.ai.topic_policy import EXCLUDED_KINDS, KINDS, MINIMUM_SOURCES, POLICY_VERSION
 from mynd.ai.topics import InvalidModelOutput, batches
+from mynd.connect.progress import names, progress_for
 from mynd.connect.sources import source_identities, support_count
 from mynd.files import atomic_write_text
 from mynd.vault.connections import term_pattern
@@ -48,7 +49,13 @@ def validate_assessment(item):
     return item
 
 
-def assess_candidates(writer, entries, store, errors, persist):
+def assess_candidates(writer, entries, store, errors, persist, *, phase_name="Candidate breadth"):
+    progress = progress_for(writer)
+    with progress.phase(progress.step or 4, phase_name, len(entries), "candidates"):
+        _assess_candidates(writer, entries, store, errors, persist, progress)
+
+
+def _assess_candidates(writer, entries, store, errors, persist, progress):
     missing = []
     for entry in entries:
         record = {key: entry[key] for key in ("id", "title", "definition", "aliases")}
@@ -61,8 +68,11 @@ def assess_candidates(writer, entries, store, errors, persist):
     by_id = {entry["id"]: entry for entry in entries}
     parts = batches(missing, 3500)
     unavailable = None
-    progress = getattr(writer, "progress", lambda _: None)
+    cached = len(entries) - len(missing)
+    if cached:
+        progress.advance(cached, f"Reused {cached}/{len(entries)} cached breadth assessments")
     for number, part in enumerate(parts, 1):
+        progress.focus(names(item["title"] for item in part))
         progress(f"Policy assessment batch {number}/{len(parts)}: {len(part)} candidates")
         try:
             if unavailable is not None:
@@ -78,10 +88,12 @@ def assess_candidates(writer, entries, store, errors, persist):
                 store.put("topic-assessments", item["cache_key"], assessment)
             if persist:
                 store.save()
+            progress.advance(len(part), "Breadth/entity assessments validated and checkpointed")
         except _FAILURES as exc:
             if not isinstance(exc, InvalidModelOutput):
                 unavailable = str(exc)
             errors.append({"stage": "policy", "candidates": [item["id"] for item in part], "error": str(exc)})
+            progress.advance(len(part), "Assessment failed; candidates retained for retry: " + str(exc))
 
 
 def relevant_passages(topic, catalog):
@@ -92,6 +104,7 @@ def relevant_passages(topic, catalog):
 
 
 def verified_mentions(writer, topic, passages, store, *, persist=False, force=False, unavailable=None):
+    progress = progress_for(writer)
     key = fingerprint([POLICY_VERSION, writer.version, topic["title"], topic["definition"],
                        sorted({normalized(name) for name in [topic["title"], *topic["aliases"]]}),
                        sorted(p.id for p in passages)])
@@ -110,19 +123,25 @@ def verified_mentions(writer, topic, passages, store, *, persist=False, force=Fa
 
     if previous is not None and not force:
         try:
-            return validate(previous)
+            result = validate(previous)
+            progress(f"Using cached evidence for {topic['title']} ({len(passages)} passages)")
+            return result
         except InvalidModelOutput:
             pass
     if unavailable is not None:
         raise RuntimeError(unavailable)
+    progress(f"Verify {topic['title']}: {len(passages)} passages from {len({p.path for p in passages})} note(s): "
+             + (names(p.path for p in passages) or "none"))
     mentions = validate(writer.match(topic, passages)) if passages else []
     store.put("candidate-evidence", key, mentions)
     if persist:
         store.save()
+    progress(f"Evidence verified: {sum(item['supports'] for item in mentions)} supporting mention(s)")
     return mentions
 
 
 def prepare_candidates(writer, groups, candidates, catalog, notes, store, errors, *, persist=False):
+    progress = progress_for(writer)
     identities = source_identities(notes)
     by_candidate = {item["id"]: item for item in candidates}
     entries = []
@@ -174,8 +193,10 @@ def prepare_candidates(writer, groups, candidates, catalog, notes, store, errors
                 entry["status"] = "evidence_pending"
                 errors.append({"stage": "candidate-evidence", "candidate_id": entry["id"], "error": str(exc)})
 
-    for entry in entries:
+    for _, entry in progress.track(4, "Candidate evidence", entries, "topics", lambda entry: entry["title"], throttle=True):
         evaluate(entry)
+        progress.outcome(f"{entry['status']}: {entry['source_count']}/{entry['minimum_sources'] or '?'} "
+                         f"original sources; {entry['breadth']}")
     # One nonrecursive broader suggestion per concept. Preserve a supported broad
     # connection when its narrow child later qualifies too; no automatic hierarchy
     # or alias/synonym merge is introduced.
@@ -197,10 +218,12 @@ def prepare_candidates(writer, groups, candidates, catalog, notes, store, errors
             broader["sources"] = sorted(set(broader["sources"]) | set(entry["sources"]))
             broader["origin_candidates"] = sorted(set(broader["origin_candidates"]) | {entry["id"]})
             reconsider[broader["id"]] = broader
-    assess_candidates(writer, broader_entries, store, errors, persist)
+    assess_candidates(writer, broader_entries, store, errors, persist, phase_name="Broader topic breadth")
     entries.extend(broader_entries)
-    for entry in reconsider.values():
+    for _, entry in progress.track(4, "Broader topic evidence", list(reconsider.values()), "topics",
+                                    lambda entry: entry["title"]):
         evaluate(entry, contextual=True)
+        progress.outcome(f"{entry['status']}: {entry['source_count']}/{entry['minimum_sources'] or '?'} original sources")
     return entries, identities
 
 
@@ -211,7 +234,7 @@ def check_review_edits(writer, group, title, definition, aliases, breadth, catal
     revised = {"title": title, "definition": definition, "aliases": aliases}
     revised.update(id=concept_id(revised), sources=group["sources"])
     errors = []
-    assess_candidates(writer, [revised], store, errors, False)
+    assess_candidates(writer, [revised], store, errors, False, phase_name="Edited topic breadth")
     assessment = revised.get("assessment")
     if assessment is None:
         raise ValueError("Edited proposal could not be assessed: " + errors[0]["error"])

@@ -136,6 +136,8 @@ class TopicWriter:
                 return validate(value)
             except (ValueError, TypeError, KeyError) as exc:
                 repair = f"\nPrevious response failed validation: {str(exc)[:250]}. Correct it."
+                self.progress(f"{operation}: validation failed ({str(exc)[:250]}); "
+                              + ("retrying once" if attempt == 0 else "repair exhausted"))
         raise InvalidModelOutput(f"{operation} failed validation:{repair}")
 
     def extract(self, passages: list[Passage]) -> list[dict]:
@@ -269,8 +271,11 @@ class TopicWriter:
 
     def match(self, topic: dict, passages: list[Passage]) -> list[dict]:
         result = []
-        for batch in batches([{"id": p.id, "text": p.text} for p in passages]):
+        parts = batches([{"id": p.id, "text": p.text} for p in passages])
+        for index, batch in enumerate(parts, 1):
             allowed = {item["id"]: item["text"] for item in batch}
+            paths = list(dict.fromkeys(p.path for p in passages if p.id in allowed))
+            locations = "; ".join(paths[:2]) + (f" (+{len(paths) - 2} more)" if len(paths) > 2 else "")
             schema = _object({"mentions": _array(_object({
                 "source": {"type": "string", "enum": list(allowed)}, "term": _string(120),
                 "supports": {"type": "boolean"},
@@ -293,7 +298,8 @@ class TopicWriter:
                 return result
 
             result.extend(self._request(
-                "Verify topic mentions", "\nFind passages actually discussing THIS concept, not "
+                f"Verify topic mentions [{topic['title']}; passage batch {index}/{len(parts)}; notes: {locations}]",
+                "\nFind passages actually discussing THIS concept, not "
                 "another meaning or merely an analogy. term must be exact visible source wording, "
                 "not a paraphrase or a generic pronoun such as 'it' or 'the method'. "
                 "Prefer the explicit concept name or an established alias. "
@@ -312,7 +318,7 @@ class TopicWriter:
         for level in range(12):
             inputs = batches(current)
             result = []
-            for batch in inputs:
+            for index, batch in enumerate(inputs, 1):
                 allowed = {source for item in batch for source in item.get("sources", [item.get("id")])}
                 schema = _object({"paragraphs": _array(_object({
                     "text": _string(1400), "sources": _ids(allowed),
@@ -337,7 +343,8 @@ class TopicWriter:
 
                 words = "80–150" if web else "200–500, shorter when evidence is thin"
                 result.extend(self._request(
-                    "Write web overview" if web else "Synthesize vault topic",
+                    ("Write web overview" if web else "Synthesize vault topic")
+                    + f" [{title}; reduction pass {level + 1}; batch {index}/{len(inputs)}]",
                     f"\nWrite a {'broad introductory overview' if web else 'definition and cross-note synthesis'} "
                     f"of {title!r}. Target {words} words for the FINAL whole section, not per source. "
                     "Cite supporting IDs for every paragraph. Distinguish source-specific claims, "

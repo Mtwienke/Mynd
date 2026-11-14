@@ -20,6 +20,8 @@ from mynd.connect.policy import (
     save_candidates,
     verified_mentions,
 )
+from mynd.connect.progress import connect_reporting, progress_for
+from mynd.connect.progress import names as progress_names
 from mynd.connect.sources import support_count
 from mynd.connect.web import OllamaWeb
 from mynd.identity import slugify
@@ -44,14 +46,18 @@ def _names(item: dict) -> set[str]:
     return {normalized(name) for name in [item["title"], *item["aliases"]]}
 
 
-def _scan(settings, store, excluded_paths, errors):
+def _source_names(sources):
+    return progress_names(source.path for source in sources) or "none"
+
+
+def _scan(settings, store, excluded_paths, errors, progress):
     notes, catalog, seen_ids = {}, {}, {}
     previous = store.items("notes")
     files = vault_files(settings)
     paths = {p.relative_to(settings.vault_path).as_posix() for p in files}
-    for path in files:
-        if path.suffix.lower() != ".md":
-            continue
+    markdown = [path for path in files if path.suffix.lower() == ".md"]
+    for _, path in progress.track(1, "Scan vault", markdown, "files",
+                                  lambda path: path.relative_to(settings.vault_path).as_posix(), throttle=True):
         relative = path.relative_to(settings.vault_path).as_posix()
         if (relative in excluded_paths or path.is_relative_to(settings.vault_path / settings.topics_folder)
                 or path.is_relative_to(settings.vault_path / YEARS_FOLDER)):
@@ -105,7 +111,9 @@ def _scan(settings, store, excluded_paths, errors):
 def _review_groups(settings, store, groups, catalog, notes, reviewer, reopen, persist, writer, identities):
     topics = store.items("topics")
     seeds, pending = {}, []
-    for group in groups:
+    progress = progress_for(writer)
+    for _, group in progress.track(5, "Candidate review", groups, "candidates",
+                                    lambda group: f"{group['title']} ({group['status']})", throttle=True):
         if group["status"] in {"excluded", "assessment_pending", "evidence_pending"}:
             continue
         sources, support = set(group["sources"]), set(group["support"])
@@ -138,7 +146,10 @@ def _review_groups(settings, store, groups, catalog, notes, reviewer, reopen, pe
             previous_action = decision.get("action", "")
             if previous_action != "reject" or reopen:
                 merge_targets = [topic for topic in topics.values() if topic.get("policy_version") == POLICY_VERSION]
+                progress(f"{'Awaiting your decision' if reviewer else 'Leaving eligible topic pending review'}: "
+                         f"{proposal.source_count}/{proposal.minimum_sources} original sources; {proposal.breadth}")
                 choice = reviewer(proposal, merge_targets) if reviewer else Decision("defer")
+                progress("Review decision: " + choice.action)
                 if choice.action not in {"approve", "merge", "reject", "defer"}:
                     raise ValueError("Invalid topic review decision")
                 breadth = choice.breadth or group["breadth"]
@@ -215,10 +226,12 @@ def _review_groups(settings, store, groups, catalog, notes, reviewer, reopen, pe
 
 
 def _web_section(settings, store, writer, topic, enabled, refresh, web_client):
+    progress = progress_for(writer)
     published = store.get("topic-output", topic["id"], {})
     old_web = published.get("web")
     old_paragraphs = published.get("web_paragraphs", [])
     if not enabled:
+        progress("Web overview disabled; retaining any previous web content")
         return old_web, old_paragraphs, ""
     key = digest(topic["query"])
     web = store.get("web", key)
@@ -231,13 +244,20 @@ def _web_section(settings, store, writer, topic, enabled, refresh, web_client):
             pass
     try:
         if web is None or expired or refresh:
+            progress("Researching web overview: " + topic["query"])
             web = web_client.research(topic["query"])
+            progress(f"Fetched {len(web['sources'])} web source(s): "
+                     + progress_names(source.get("title", source.get("url", "")) for source in web["sources"]))
             store.put("web", key, web)
+        else:
+            progress("Using cached web research")
         fingerprint = _fingerprint([writer.version, topic["title"],
                                     [(item["id"], item["text"]) for item in web["sources"]]])
         if published.get("web_fingerprint") == fingerprint:
+            progress("Using cached web overview")
             paragraphs = old_paragraphs
         else:
+            progress("Synthesizing web overview")
             material = []
             for source in web["sources"]:
                 # A short overview needs bounded opening passages, not entire websites.
@@ -256,7 +276,9 @@ def connect_vault(settings: Settings, writer: TopicWriter, *, reviewer: Reviewer
                   web_enabled: bool | None = None, refresh_web: bool = False,
                   web_client: OllamaWeb | None = None, breadth_overrides: dict[str, str] | None = None) -> dict:
     """Reusable coordinator. New topics require explicit review even when unattended."""
-    with maintenance_lock(settings, dry_run=dry_run):
+    with maintenance_lock(settings, dry_run=dry_run), connect_reporting(writer) as progress:
+        progress("Percentages count processed units within each phase, not elapsed time or model tokens.")
+        progress("Loading maintenance cache and indexing vault files")
         store = MaintenanceStore(settings)
         for identifier, breadth in (breadth_overrides or {}).items():
             if breadth not in MINIMUM_SOURCES or not store.get("topic-candidates", identifier):
@@ -264,13 +286,14 @@ def connect_vault(settings: Settings, writer: TopicWriter, *, reviewer: Reviewer
             store.put("candidate-breadths", identifier, {"breadth": breadth})
         errors = []
         topics_before = store.items("topics")
-        notes, catalog = _scan(settings, store, {t["path"] for t in topics_before.values()}, errors)
+        notes, catalog = _scan(settings, store, {t["path"] for t in topics_before.values()}, errors, progress)
         analyzed, cached = 0, 0
         candidates = []
         version = PARSER_VERSION + ":" + writer.version
-        progress = getattr(writer, "progress", lambda _: None)
         discovery_notes = [(key, value) for key, value in notes.items() if value[0].kind != "course"]
-        for number, (identifier, (doc, sources)) in enumerate(discovery_notes, 1):
+        for number, (identifier, (doc, sources)) in progress.track(
+            2, "Discovery", discovery_notes, "notes", lambda item: item[1][0].relative,
+        ):
             fingerprint = _fingerprint([version, [(p.id, p.text) for p in sources]])
             previous = store.get("analysis", identifier)
             if not all_notes and previous and previous["fingerprint"] == fingerprint:
@@ -286,6 +309,7 @@ def connect_vault(settings: Settings, writer: TopicWriter, *, reviewer: Reviewer
                     if not dry_run:
                         store.save()
                 except _FAILURES as exc:
+                    progress("Discovery failed; prior checkpoints retained: " + str(exc))
                     errors.append({"path": doc.relative, "stage": "discovery", "error": str(exc)})
                     continue
             candidates.extend(item for item in items if all(key in catalog for key in item["sources"]))
@@ -296,6 +320,7 @@ def connect_vault(settings: Settings, writer: TopicWriter, *, reviewer: Reviewer
         policy_groups, identities = prepare_candidates(
             writer, grouping.groups, candidates, catalog, notes, store, errors, persist=not dry_run,
         )
+        progress("Checkpointing candidate register" if not dry_run else "Preparing candidate register preview")
         save_candidates(settings, store, policy_groups, catalog, persist=not dry_run)
         topics, seeds, pending = _review_groups(
             settings, store, policy_groups, catalog, notes, reviewer, reopen, not dry_run,
@@ -318,9 +343,12 @@ def connect_vault(settings: Settings, writer: TopicWriter, *, reviewer: Reviewer
         web_client = web_client or OllamaWeb()
         enabled = settings.topic_web_enabled if web_enabled is None else web_enabled
         try:
-            for topic_id, topic in topics.items():
+            for _, (topic_id, topic) in progress.track(
+                6, "Update topics", list(topics.items()), "topics", lambda item: f"{item[1]['title']} → {item[1]['path']}",
+            ):
                 previous_content = None
                 if topic.get("policy_version") != POLICY_VERSION:
+                    progress("Held: legacy approval requires new-policy review; no node will be created")
                     legacy_approvals.append({"id": topic_id, "title": topic["title"], "path": topic["path"],
                                              "status": "requires_policy_review"})
                     # Legacy approvals do not bypass the new creation policy.
@@ -354,12 +382,15 @@ def connect_vault(settings: Settings, writer: TopicWriter, *, reviewer: Reviewer
                     relevant = [source for source in catalog.values()
                                 if source.id in seeds.get(topic_id, set()) or source.id in prior_sources or any(
                                     name and re.search(term_pattern(name), source.text, re.IGNORECASE)
-                                    for name in names)]
+                                     for name in names)]
+                    progress(f"Checking mentions in {len(relevant)} passages from "
+                             f"{len({p.path for p in relevant})} note(s): " + _source_names(relevant))
                     match_fingerprint = _fingerprint([
                         version, POLICY_VERSION, topic["definition"], names, sorted(p.id for p in relevant),
                     ])
                     previous_matches = store.get("matches", topic_id, {})
                     if not all_notes and previous_matches.get("fingerprint") == match_fingerprint:
+                        progress("Using cached topic mentions")
                         mentions = previous_matches["mentions"]
                     else:
                         mentions = verified_mentions(writer, topic, relevant, store, force=all_notes)
@@ -377,8 +408,10 @@ def connect_vault(settings: Settings, writer: TopicWriter, *, reviewer: Reviewer
                         raise ValueError("Verified original-source support is below this topic's creation threshold")
                     local_fingerprint = _fingerprint([version, topic["title"], sorted(supporting)])
                     if output.get("local_fingerprint") == local_fingerprint:
+                        progress("Using cached vault synthesis")
                         paragraphs = output["paragraphs"]
                     else:
+                        progress(f"Synthesizing vault topic from {len(supporting)} supporting passage(s)")
                         material = [{"id": key, "note_id": identities.get(catalog[key].note_id) or catalog[key].note_id,
                                      "text": catalog[key].text} for key in sorted(supporting)]
                         paragraphs = writer.summarize(material, topic["title"])
@@ -406,6 +439,9 @@ def connect_vault(settings: Settings, writer: TopicWriter, *, reviewer: Reviewer
                         raise ValueError("Generated topic failed Markdown/ownership validation")
                     if rendered != previous_content:
                         changes.append(Change(topic_path, previous_content, rendered))
+                        progress("Prepared topic update; vault writes happen in phase 8")
+                    else:
+                        progress("Topic already up to date")
                     output = store.get("topic-output", topic_id, {})
                     output.update(web=web, web_paragraphs=web_paragraphs,
                                   aliases=topic["aliases"],
@@ -421,6 +457,7 @@ def connect_vault(settings: Settings, writer: TopicWriter, *, reviewer: Reviewer
                     topic_results.append({"id": topic_id, "path": topic["path"],
                                           "mentions": len(mentions), "supporting": len(supporting)})
                 except _FAILURES as exc:
+                    progress("Topic update deferred; preserving prior content: " + str(exc))
                     errors.append({"topic_id": topic_id, "stage": "topic", "error": str(exc)})
                     if previous_content:
                         try:
@@ -440,21 +477,42 @@ def connect_vault(settings: Settings, writer: TopicWriter, *, reviewer: Reviewer
                                 "title": topic["title"], "names": [topic["title"], *topic["aliases"]],
                                 "mentions": valid,
                             })
-            for identifier, (doc, _) in notes.items():
+            for _, (identifier, (doc, _)) in progress.track(
+                7, "Update note links", list(notes.items()), "notes", lambda item: item[1][0].relative, throttle=True,
+            ):
                 try:
                     rendered = connect_note(doc.content, identifier, assignments[identifier])
                     if rendered != doc.content:
                         changes.append(Change(doc.path, doc.content, rendered))
+                        progress.outcome("Prepared source-note connections")
+                    else:
+                        progress.outcome("Source-note connections unchanged")
                 except _FAILURES as exc:
+                    progress("Link update deferred: " + str(exc))
+                    progress.outcome("Source-note update deferred")
                     errors.append({"path": doc.relative, "stage": "linking", "error": str(exc)})
-            run_id = None if dry_run else apply_changes(settings, changes, "connect", dependencies={
-                doc.path: doc.content for doc, _ in notes.values()
-            })
-            if not dry_run:
-                store.save()
+            with progress.phase(8, "Preview changes" if dry_run else "Write changes",
+                                1 if dry_run else len(changes) + 1, "operations"):
+                def written(path):
+                    progress.focus(path.relative_to(settings.vault_path).as_posix())
+                    progress.advance(message="Written; recovery journal checkpoint saved")
+
+                if dry_run:
+                    run_id = None
+                    progress.advance(message=f"Dry run: {len(changes)} proposed files; no vault or state writes")
+                else:
+                    progress("Preparing checked preimages and recovery journal")
+                    run_id = apply_changes(settings, changes, "connect", dependencies={
+                        doc.path: doc.content for doc, _ in notes.values()
+                    }, on_written=written)
+                    progress.focus("Maintenance database")
+                    store.save()
+                    progress.advance(message="Maintenance checkpoints saved")
         finally:
             if own_web_client:
                 web_client.close()
+        progress(f"Finished: {len(topic_results)} topics processed, {len(pending)} awaiting review, "
+                 f"{len(errors)} issue(s); {len(changes)} files {'proposed' if dry_run else 'changed'}")
         return {"status": "partial" if errors else "pending_review" if pending else "complete",
                 "dry_run": dry_run, "analyzed": analyzed, "cached": cached,
                 "changed": len(changes), "run_id": run_id, "topics": topic_results,

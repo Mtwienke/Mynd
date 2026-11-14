@@ -808,3 +808,61 @@ def test_connect_progress_and_cli_report_grouping_without_polluting_json(setting
         assert json.loads(result.stdout)["grouping"]["cached_batches"] == 1
         report = runner.invoke(app, ["connect", "-c", str(config_file), "--non-interactive", "--offline"])
         assert "Grouping: 1/1 batches complete, 1 cached" in report.stdout
+
+
+def test_connect_reports_all_phases_topic_work_and_journaled_file_writes(settings):
+    note(settings, "one.md", "# One\n\nSelf-attention is a key concept for understanding tokens.")
+    messages = []
+    writer = FakeWriter()
+    callback = messages.append
+    writer.progress = callback
+    result = connect_vault(settings, writer, reviewer=approve)
+    assert result["status"] == "complete"
+    assert all(any(f"Connect {step}/8" in line for line in messages) for step in range(1, 9))
+    assert any("Discovery 100% (1/1 notes)" in line for line in messages)
+    assert any("Update topics 0% (0/1 topics)" in line and "Self-attention" in line for line in messages)
+    assert any("Checking mentions in 1 passages from 1 note(s): one.md" in line for line in messages)
+    assert any("Written; recovery journal checkpoint saved" in line and "one.md" in line for line in messages)
+    assert any("Write changes 100% (3/3 operations)" in line for line in messages)
+    assert writer.progress is callback
+
+
+@pytest.mark.parametrize("flag", ["--verbose", "-v"])
+def test_connect_verbose_aliases_forward_diagnostics_and_keep_progress_on_stderr(settings, config_file, flag):
+    note(settings, "one.md", "# One\n\nSelf-attention is a key concept for understanding tokens.")
+    seen = []
+    def generator(*, runtime_control, progress, verbose):
+        seen.append(verbose)
+        return SimpleNamespace(model="test-local", progress=progress, close=lambda: None)
+    def writer_factory(generator, progress):
+        writer = FakeWriter()
+        writer.progress, writer.generator = progress, generator
+        extract = writer.extract
+        def diagnostic_extract(sources):
+            generator.progress("Ollama request: options={}; model=test-local")
+            return extract(sources)
+        writer.extract = diagnostic_extract
+        return writer
+    with patch("mynd.cli.load_settings", return_value=settings), \
+         patch("mynd.cli.build_text_generator", side_effect=generator), \
+         patch("mynd.cli.TopicWriter", side_effect=writer_factory):
+        result = CliRunner().invoke(app, ["connect", "-c", str(config_file), "--dry-run",
+                                         "--non-interactive", "--offline", "--json", flag])
+    assert result.exit_code == 1 and json.loads(result.stdout)["dry_run"]
+    assert seen == [True]
+    assert "Connect 2/8 | Discovery" in result.stderr and "one.md" in result.stderr
+    assert "Ollama request: options={}" in result.stderr
+    assert "no vault or state writes" in result.stderr
+    assert not settings.database_path.exists()
+
+
+def test_write_progress_only_fires_after_a_durable_journal_checkpoint(settings):
+    path = note(settings, "one.md", "Original.")
+    observed = []
+    def written(target):
+        manifest = json.loads(next(settings.data_path.rglob("manifest.json")).read_text())
+        assert manifest["entries"][0]["written"] is True
+        assert target.read_text() == "Updated."
+        observed.append(target)
+    apply_changes(settings, [Change(path, read_text(path), "Updated.")], "test-progress", on_written=written)
+    assert observed == [path]

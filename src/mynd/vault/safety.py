@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -88,7 +89,8 @@ def _verify(change: Change) -> None:
 
 
 def apply_changes(settings: Settings, changes: list[Change], operation: str, *,
-                  dependencies: dict[Path, str] | None = None) -> str | None:
+                  dependencies: dict[Path, str] | None = None,
+                  on_written: Callable[[Path], None] | None = None) -> str | None:
     changes = [change for change in changes if change.before != change.after]
     if not changes:
         return None
@@ -130,6 +132,8 @@ def apply_changes(settings: Settings, changes: list[Change], operation: str, *,
             atomic_write_text(change.path, change.after)
         entry["written"] = True
         save()
+        if on_written:
+            on_written(change.path)
     manifest["status"] = "complete"
     save()
     return run_id

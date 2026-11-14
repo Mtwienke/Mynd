@@ -127,7 +127,7 @@ def connect_topics(
     web: bool | None = typer.Option(None, "--web/--offline", help="Override configured web enrichment"),
     refresh_web: bool = typer.Option(False, "--refresh-web", help="Refresh cached web sources"),
     mode: str | None = typer.Option(None, "--mode", help="Initial inference mode: normal or silent"),
-    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show local model diagnostics"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show Ollama options, timings, token rates and runtime allocation"),
     json_output: bool = typer.Option(False, "--json", help="Print the full machine-readable report"),
     reclassify: list[str] | None = typer.Option(None, "--reclassify", help="Correct saved CANDIDATE_ID=BREADTH; repeatable"),
 ) -> None:
