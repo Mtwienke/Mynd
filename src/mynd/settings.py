@@ -29,6 +29,17 @@ class Settings:
     crossref_email: str = DEFAULT_CROSSREF_EMAIL
     allow_remote_services: bool = False
     slides_inbox_path: Path | None = None
+    topics_folder: str = "20 Topics"
+    maintenance_excludes: tuple[str, ...] = ()
+    topic_web_enabled: bool = False
+    topic_web_cache_days: int = 30
+
+    def __post_init__(self) -> None:
+        folder = Path(self.topics_folder)
+        if folder.is_absolute() or ".." in folder.parts or not folder.parts:
+            raise ValueError("topics_folder must be a nonempty vault-relative folder")
+        if self.topic_web_cache_days < 1:
+            raise ValueError("topic_web_cache_days must be positive")
 
     @property
     def slides_inbox(self) -> Path:
@@ -54,6 +65,12 @@ def load_settings(path: Path) -> Settings:
             f"{path} is missing required setting(s): {', '.join(missing)}"
         )
     base = path.parent
+    excludes = raw.get("maintenance_excludes", [])
+    if not isinstance(excludes, list) or not all(isinstance(item, str) for item in excludes):
+        raise ValueError("maintenance_excludes must be a list of glob patterns")
+    web_enabled = raw.get("topic_web_enabled", False)
+    if not isinstance(web_enabled, bool):
+        raise TypeError("topic_web_enabled must be true or false")
 
     def resolve(value: str) -> Path:
         candidate = Path(value).expanduser()
@@ -70,4 +87,8 @@ def load_settings(path: Path) -> Settings:
         crossref_email=raw.get("crossref_email", DEFAULT_CROSSREF_EMAIL),
         allow_remote_services=bool(raw.get("allow_remote_services", False)),
         slides_inbox_path=resolve(raw["slides_inbox_path"]) if "slides_inbox_path" in raw else None,
+        topics_folder=str(raw.get("topics_folder", "20 Topics")),
+        maintenance_excludes=tuple(excludes),
+        topic_web_enabled=web_enabled,
+        topic_web_cache_days=int(raw.get("topic_web_cache_days", 30)),
     )

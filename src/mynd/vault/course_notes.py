@@ -7,6 +7,8 @@ from pathlib import Path
 
 from mynd.courses.models import Course, Lecture, StudyQuestion, StudySection
 from mynd.files import atomic_write_text
+from mynd.vault.connections import preserve_connections
+from mynd.vault.safety import read_text
 
 
 def _inline(value: str) -> str:
@@ -66,7 +68,8 @@ def _questions(vault: Path, questions: tuple[StudyQuestion, ...], lectures: dict
 
 def _write(path: Path, kind: str, identifier: str, title: str, blocks: dict[str, str], *,
            previous_title: str | None = None) -> Path:
-    content = path.read_text(encoding="utf-8") if path.exists() else ""
+    previous = read_text(path) if path.exists() else None
+    content = previous or ""
     prefix = f"---\ntype: {kind}\nwork_id: {json.dumps(identifier)}\n---\n\n"
     if not content:
         content = prefix + f"# {_inline(title)}\n\n"
@@ -91,7 +94,13 @@ def _write(path: Path, kind: str, identifier: str, title: str, blocks: dict[str,
             content, count = pattern.subn(lambda _, value=replacement: value, content)
             if count != 1:
                 raise ValueError(f"Damaged managed block '{key}' in {path}")
-    atomic_write_text(path, content)
+    if previous is not None:
+        content = preserve_connections(previous, content)
+    current = read_text(path) if path.exists() else None
+    if current != previous:
+        raise ValueError(f"Concurrent edit detected; refusing to overwrite {path}")
+    if content != previous:
+        atomic_write_text(path, content)
     return path
 
 

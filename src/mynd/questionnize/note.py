@@ -7,6 +7,8 @@ from pathlib import Path
 from mynd.contracts import PaperMetadata
 from mynd.files import atomic_write_text
 from mynd.questionnize.writer import QuestionSet, QuestionWriter
+from mynd.vault.connections import preserve_connections
+from mynd.vault.safety import read_text
 
 EXTRACTED_QUESTIONS_HEADING = "Extracted questions"
 _NO_SUMMARY = "_Summary unavailable"
@@ -19,6 +21,8 @@ _NOTE_HEADINGS = (
     "Questions",
     "Reading log",
     "Provenance",
+    "Related topics",
+    "Related topics (Mynd)",
 )
 _HEADING = re.compile(r"^##\s+(?P<title>.+?)\s*$")
 
@@ -51,18 +55,18 @@ def extract_section(content: str, heading: str) -> str:
 
 def write_questions(note_path: Path, questions: QuestionSet) -> Path:
     """Insert or replace the extracted-questions chapter in a paper note."""
-    content = note_path.read_text(encoding="utf-8")
+    content = read_text(note_path)
     if "<!-- mynd:" in content and re.search(r"(?m)^type: (lecture|course)\s*$", content):
         raise ValueError(
             "Course notes use slide-grounded questions and managed blocks. "
             "Regenerate them with `mynd ingest --kind slides --regenerate`, not paper questionnize."
         )
-    atomic_write_text(
-        note_path,
-        _upsert_section(
-            content, EXTRACTED_QUESTIONS_HEADING, questions.to_markdown()
-        ),
-    )
+    updated = preserve_connections(content, _upsert_section(
+        content, EXTRACTED_QUESTIONS_HEADING, questions.to_markdown()
+    ))
+    if read_text(note_path) != content:
+        raise ValueError(f"Concurrent edit detected; refusing to overwrite {note_path}")
+    atomic_write_text(note_path, updated)
     return note_path
 
 

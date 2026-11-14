@@ -5,7 +5,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from mynd.contracts import MAX_YEAR, MIN_YEAR, CitationRecord, PaperMetadata
+from mynd.contracts import CitationRecord, PaperMetadata
 from mynd.files import atomic_write_text
 from mynd.identity import (
     WHITESPACE,
@@ -15,6 +15,13 @@ from mynd.identity import (
     title_work_id,
 )
 from mynd.resolution.doi import normalize_doi
+from mynd.resolution.publication_year import publication_year as _publication_year
+from mynd.vault.connections import preserve_connections
+from mynd.vault.formatting import jats_abstract, summary_markdown
+from mynd.vault.managed import unwrap_links
+from mynd.vault.paper_updates import refresh_paper
+from mynd.vault.safety import read_text
+from mynd.vault.year_notes import ensure_year_note, year_link
 
 _SECTION_HEADINGS = (
     "Summary",
@@ -34,8 +41,6 @@ _DEFAULT_QUESTIONS = "_What do I want to remember or investigate?_"
 _DEFAULT_READING_LOG = "_Add reading dates and observations here._"
 _DEFAULT_PLACEHOLDER_NOTES = "_Add your own notes about this reference here._"
 _CITATION_GROUP = r"(\d+(?:\s*[,;–-]\s*\d+)*)"
-_PARENTHESIZED_YEAR = re.compile(r"\(\s*(\d{4})\s*\)")
-_LOOSE_YEAR = re.compile(r"\b(\d{4})\b")
 _CITED_BY_LINE = re.compile(r"(?m)^- \*\*Cited by:\*\* (.+)$")
 _OBSIDIAN_LINK = re.compile(r"\[\[[^\]]+\]\]")
 _CITED_BY_WORK_ID = re.compile(
@@ -58,7 +63,7 @@ def _or_unknown(value: object, fallback: str = "Unknown") -> str:
 
 
 def _year_link(year: int | None) -> str:
-    return f"[[{year}]]" if year else "Unknown"
+    return year_link(year)
 
 
 def _yaml_year(year: int | None) -> str:
@@ -123,22 +128,9 @@ def write_reference_placeholder(
         cited_by=cited_by,
         notes=notes,
     )
+    ensure_year_note(vault, year)
     atomic_write_text(path, content)
     return path
-
-
-def _publication_year(citation: CitationRecord, raw: str) -> int | None:
-    """Use GROBID's year first, then fall back to the raw reference text."""
-    value = citation.get("year")
-    if isinstance(value, int) and MIN_YEAR <= value <= MAX_YEAR:
-        return value
-    candidates = (str(value or ""), raw)
-    for pattern in (_PARENTHESIZED_YEAR, _LOOSE_YEAR):
-        for source in candidates:
-            match = pattern.search(source)
-            if match and MIN_YEAR <= int(match.group(1)) <= MAX_YEAR:
-                return int(match.group(1))
-    return None
 
 
 def _citing_note_link(citing_title: str, citing_paper_id: str) -> str:
@@ -356,7 +348,7 @@ def _paper_metadata_block(metadata: PaperMetadata, source_pdf: Path) -> str:
     authors = [_sanitize_inline(author) for author in metadata.get("authors") or []]
     fields = (
         ("Authors", _or_unknown(", ".join(authors))),
-        ("Year", _or_unknown(metadata.get("year"))),
+        ("Year", year_link(metadata.get("year"))),
         ("Venue", _sanitize_inline(_or_unknown(metadata.get("venue")))),
         ("DOI", _doi_display(metadata.get("doi") or "")),
         ("Source PDF", f"`{source_pdf.as_posix()}`"),
@@ -380,7 +372,7 @@ def _read_human_sections(path: Path) -> dict[str, str]:
     """Capture human-authored sections so refreshes never clobber them."""
     if not path.exists():
         return {}
-    existing = path.read_text(encoding="utf-8")
+    existing = unwrap_links(read_text(path))
     return {
         heading: body
         for heading in _SECTION_HEADINGS
@@ -405,7 +397,7 @@ def _render_paper_note(
     questions: str | None,
     human_sections: dict[str, str],
 ) -> str:
-    summary_content = _sanitize_block(
+    summary_content = summary_markdown(
         summary or human_sections.get("Summary") or _SUMMARY_FALLBACK
     )
     questions_content = (
@@ -413,7 +405,7 @@ def _render_paper_note(
         or human_sections.get("Extracted questions")
         or _NO_EXTRACTED_QUESTIONS
     )
-    abstract = _sanitize_block(metadata.get('abstract') or '_No abstract retrieved._')
+    abstract = _sanitize_block(jats_abstract(metadata.get('abstract') or '_No abstract retrieved._'))
     return f"""---
 type: paper
 work_id: {_yaml_quote(paper_id)}
@@ -469,6 +461,7 @@ def write_paper_note(note: PaperNote) -> Path:
     papers_dir.mkdir(parents=True, exist_ok=True)
     title = _sanitize_inline(note.metadata.get("title") or note.source_pdf.stem)
     path = _note_path(papers_dir, title, note.paper_id)
+    previous = read_text(path) if path.exists() else None
     human_sections = _read_human_sections(path)
     content = _render_paper_note(
         vault=note.vault,
@@ -481,5 +474,12 @@ def write_paper_note(note: PaperNote) -> Path:
         questions=note.questions,
         human_sections=human_sections,
     )
-    atomic_write_text(path, content)
+    if previous is not None:
+        content = preserve_connections(previous, refresh_paper(previous, content))
+    current = read_text(path) if path.exists() else None
+    if current != previous:
+        raise ValueError(f"Concurrent edit detected; refusing to overwrite {path}")
+    ensure_year_note(note.vault, note.metadata.get("year"))
+    if content != previous:
+        atomic_write_text(path, content)
     return path

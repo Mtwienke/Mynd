@@ -18,3 +18,12 @@ crossref_email = "you@example.com"
 # PDFs are only sent to a loopback GROBID host by default. Set this to true
 # only if you intentionally run GROBID on another machine.
 allow_remote_services = false
+
+# Independently callable vault maintenance: mynd clean / mynd connect.
+topics_folder = "20 Topics"
+maintenance_excludes = [] # Vault-relative glob patterns; dotfolders/symlinks are always excluded.
+# Search/fetch are hosted, while ALL text generation stays local. Only approved
+# topic queries and URLs leave your machine. A free Ollama API key is required:
+# export OLLAMA_API_KEY="..." (never put the key in this file).
+topic_web_enabled = false # Opt in here, or use `mynd connect --web`.
+topic_web_cache_days = 30

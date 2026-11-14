@@ -165,7 +165,8 @@ def test_write_reference_placeholder_saves_grobid_fields_and_dump(tmp_path):
     content = path.read_text(encoding="utf-8")
     assert "## GROBID Dump" in content
     assert "year: 2023" in content
-    assert "[[2023]]" in content
+    assert "[[Years/20s/year-2023|2023]]" in content
+    assert (vault / "Years/20s/year-2023.md").exists()
     assert '"arxiv": "2401.00001"' in content
     assert "<tei:biblStruct>" in content
     assert "- **Venue:** Journal of Examples" in content
@@ -203,7 +204,8 @@ def test_write_reference_placeholder_falls_back_to_raw_year(tmp_path):
 
     content = path.read_text(encoding="utf-8")
     assert "year: 2021" in content
-    assert "[[2021]]" in content
+    assert "[[Years/20s/year-2021|2021]]" in content
+    assert (vault / "Years/20s/year-2021.md").exists()
 
 
 def test_placeholder_cited_by_points_to_actual_citing_note(tmp_path):

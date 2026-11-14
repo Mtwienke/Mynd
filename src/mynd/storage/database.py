@@ -104,6 +104,13 @@ def initialize_database(path: Path) -> None:
                 error TEXT NOT NULL DEFAULT '',
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
+            CREATE TABLE IF NOT EXISTS vault_maintenance (
+                vault TEXT NOT NULL,
+                namespace TEXT NOT NULL,
+                key TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                PRIMARY KEY (vault, namespace, key)
+            );
             """
         )
         _ensure_citation_columns(db)

@@ -60,9 +60,9 @@ class SummaryWriter:
         prompt = f"""You are writing a study summary for a personal research library.
 Use only claims supported by the source material below. Do not invent details.
 If the text does not establish something, say so briefly. Output clear Markdown
-using these exact headings in this exact order: `## Overview`,
-`## Main contributions`, `## Approach`, `## Findings`, and
-`## Limitations and open questions`. Do not rename or omit these headings.
+using these exact subsection headings in this exact order: `### Overview`,
+`### Main contributions`, `### Approach`, `### Findings`, and
+`### Limitations and open questions`. Do not rename or omit these headings.
 If a heading has little evidence, say so briefly under it. Summarize the paper's
 own claims and findings. Do not add citation callouts, bibliography entries, or
 claims about cited works.
