@@ -9,6 +9,7 @@ from pathlib import Path
 
 import httpx
 import typer
+from dotenv import load_dotenv
 
 from mynd.ai.models import build_text_generator
 from mynd.ai.runtime import RuntimeControl
@@ -155,6 +156,10 @@ def connect_topics(
             if not separator or not identifier or not breadth:
                 raise ValueError("Use --reclassify CANDIDATE_ID=umbrella|established|specialized|niche")
             breadth_overrides[identifier] = breadth
+        web_active = settings.topic_web_enabled if web is None else web
+        keys_path = config.parent / ".keys"
+        if web_active and keys_path.is_file():
+            load_dotenv(keys_path, override=False, interpolate=False)
         result = connect_vault(
             settings, TopicWriter(generator, progress), reviewer=reviewer, all_notes=all_notes,
             dry_run=dry_run, reopen=review, web_enabled=web, refresh_web=refresh_web,

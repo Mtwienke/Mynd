@@ -567,11 +567,32 @@ which currently has a [free tier](https://ollama.com/blog/web-search). No additi
 server, hosted model, or Ollama Python SDK is needed. Free-tier limits can change;
 there is no paid fallback.
 
+Create a key at [ollama.com/settings/keys](https://ollama.com/settings/keys) and store
+it in **`.keys` next to your `config.toml`** as `export OLLAMA_API_KEY='your-key'`.
+`.keys` and its editor backups are ignored by Git; `.keys.example` is a tracked
+template and must never contain real keys. On a fresh checkout, create the local
+file once:
+
 ```bash
-export OLLAMA_API_KEY="your-key"   # Create a free account/key at ollama.com/settings/keys
+cp -n .keys.example .keys         # Preserve an existing local file
+chmod 600 .keys                  # Only your user can read/write it
+```
+
+Edit `.keys` in your editor, then run Connect directly—no `source` is needed:
+
+```bash
 mynd connect --web
 mynd connect --web --refresh-web  # Explicitly refresh cached sources
 ```
+
+When web enrichment is enabled (`--web`, `--refresh-web`, or
+`topic_web_enabled = true`), Connect loads `.keys` next to the selected configuration
+file, including when using `--config` from another directory. A missing file is
+fine; existing environment variables always take precedence. `--offline` skips
+loading it. Additional keys can use their own `export NAME='value'` lines in the
+same file. Loading uses `python-dotenv`, not a shell: values are literal, with no
+command execution or variable expansion. Your active virtual environment and the
+parent terminal's environment remain unchanged.
 
 Only approved topic queries and selected public URLs go to Ollama's hosted API,
 **not vault text**. Retrieved page content is summarized by your local model. The

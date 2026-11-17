@@ -1,0 +1,7 @@
+# Template only: never put real keys in this tracked file.
+# Copy to .keys, restrict permissions with chmod 600 .keys, then fill in your keys.
+# mynd connect loads .keys next to config.toml automatically when web is enabled.
+# Create an Ollama key at https://ollama.com/settings/keys
+export OLLAMA_API_KEY=''
+
+# Add future keys to .keys as separate lines: export OTHER_API_KEY='your-key'

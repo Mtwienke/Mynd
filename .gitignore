@@ -1,5 +1,8 @@
 /vault/
 /Obsidian/
+# Local API keys and editor backups; only the empty template is tracked.
+/.keys*
+!/.keys.example
 __pycache__/
 *.py[cod]
 .DS_Store

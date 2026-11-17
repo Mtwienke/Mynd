@@ -24,6 +24,8 @@ topics_folder = "20 Topics"
 maintenance_excludes = [] # Vault-relative glob patterns; dotfolders/symlinks are always excluded.
 # Search/fetch are hosted, while ALL text generation stays local. Only approved
 # topic queries and URLs leave your machine. A free Ollama API key is required:
-# export OLLAMA_API_KEY="..." (never put the key in this file).
+# Store it in the gitignored .keys file next to config.toml (see .keys.example).
+# Connect loads it automatically when web enrichment is enabled.
+# Never put the key in this configuration file.
 topic_web_enabled = false # Opt in here, or use `mynd connect --web`.
 topic_web_cache_days = 30
