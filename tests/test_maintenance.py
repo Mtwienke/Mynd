@@ -20,7 +20,7 @@ from mynd.vault.course_notes import _write as write_course_blocks
 from mynd.vault.managed import block_range, owned_links, put_block, unwrap_links
 from mynd.vault.markdown import LinkIndex, parse_document, passages, vault_files
 from mynd.vault.note_writer import PaperNote, write_paper_note
-from mynd.vault.safety import Change, apply_changes, read_text, restore_run
+from mynd.vault.safety import Change, apply_changes, digest, read_text, restore_run
 
 
 @pytest.fixture
@@ -534,6 +534,77 @@ def test_web_failure_keeps_valid_content_and_retries_only_failed_stage(settings)
     assert third["status"] == "partial"
     assert "Previous web content is retained" in read_text(topic)
     assert "[Attention reference]" in read_text(topic)
+
+
+def test_switching_web_provider_uses_separate_cache_and_keeps_local_work(settings):
+    note(settings, "one.md", "# One\n\nSelf-attention is a key concept for understanding tokens.")
+    writer, web = FakeWriter(), FakeWeb()
+    first = connect_vault(settings, writer, reviewer=approve, web_enabled=True, web_client=web)
+    assert first["status"] == "complete"
+    prior = writer.calls.copy()
+    # Identical fetched material can retain its synthesis, but must be searched
+    # through the newly selected provider rather than reuse the other web cache.
+    writer.fail = True
+    switched = connect_vault(replace(settings, topic_web_provider="ollama"), writer,
+                             web_enabled=True, web_client=web)
+    assert switched["status"] == "complete"
+    assert len(web.calls) == 2 and writer.calls == prior
+    back = connect_vault(settings, writer, web_enabled=True, web_client=web)
+    assert back["status"] == "complete"
+    assert len(web.calls) == 2
+
+
+def test_ollama_reuses_legacy_web_cache(settings):
+    settings = replace(settings, topic_web_provider="ollama")
+    note(settings, "one.md", "# One\n\nSelf-attention is a key concept for understanding tokens.")
+    writer, web = FakeWriter(), FakeWeb()
+    connect_vault(settings, writer, reviewer=approve, web_enabled=True, web_client=web)
+    store = MaintenanceStore(settings)
+    key, cached = next(iter(store.items("web").items()))
+    store.delete("web", key)
+    store.put("web", digest(cached["query"]), cached)
+    store.save()
+    writer.fail = True
+    result = connect_vault(settings, writer, web_enabled=True, web_client=web)
+    assert result["status"] == "complete" and result["changed"] == 0
+    assert len(web.calls) == 1
+
+
+def test_switching_provider_retains_previous_web_content_if_new_provider_fails(settings):
+    note(settings, "one.md", "# One\n\nSelf-attention is a key concept for understanding tokens.")
+    writer, web = FakeWriter(), FakeWeb()
+    first = connect_vault(replace(settings, topic_web_provider="ollama"), writer,
+                          reviewer=approve, web_enabled=True, web_client=web)
+    topic = settings.vault_path / first["topics"][0]["path"]
+    writer.fail, web.fail = True, True
+    result = connect_vault(settings, writer, web_enabled=True, web_client=web)
+    assert result["status"] == "partial"
+    assert "Previous web content is retained" in read_text(topic)
+    assert "[Attention reference]" in read_text(topic)
+
+
+def test_offline_connect_does_not_construct_a_web_backend(settings):
+    note(settings, "one.md", "# One\n\nSelf-attention is a key concept for understanding tokens.")
+    with patch("mynd.connect.service.build_web_client") as factory:
+        result = connect_vault(settings, FakeWriter(), reviewer=approve, web_enabled=False)
+    assert result["status"] == "complete"
+    factory.assert_not_called()
+
+
+@pytest.mark.parametrize("provider", ["ddgs", "ollama"])
+def test_connect_selects_and_closes_its_own_web_backend(settings, provider):
+    from unittest.mock import MagicMock
+
+    settings = replace(settings, topic_web_provider=provider)
+    note(settings, "one.md", "# One\n\nSelf-attention is a key concept for understanding tokens.")
+    backend = MagicMock(wraps=FakeWeb())
+    # Injected FakeWeb fixtures need no close method; owned backends do.
+    backend.close = MagicMock()
+    with patch("mynd.connect.service.build_web_client", return_value=backend) as factory:
+        result = connect_vault(settings, FakeWriter(), reviewer=approve, web_enabled=True)
+    assert result["status"] == "complete"
+    factory.assert_called_once_with(provider)
+    backend.close.assert_called_once()
 
 
 def test_unreadable_supporting_note_defers_topic_update_instead_of_withdrawing_claims(settings):

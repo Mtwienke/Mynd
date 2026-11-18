@@ -560,12 +560,49 @@ Breadth/entity assessments and verified candidate evidence have separate caches;
 the new policy does not invalidate completed discovery. Failed assessments or
 evidence checks leave candidates pending, never implicitly eligible.
 
-### Optional free-tier web overview
+### Optional key-free web overview
 
-Mynd uses [Ollama's hosted search/fetch API](https://docs.ollama.com/capabilities/web-search),
-which currently has a [free tier](https://ollama.com/blog/web-search). No additional
-server, hosted model, or Ollama Python SDK is needed. Free-tier limits can change;
-there is no paid fallback.
+The default [DDGS](https://github.com/deedy5/ddgs) backend searches public engines
+(DuckDuckGo, Brave, and Mojeek),
+then downloads and extracts readable HTML/plain-text pages on your machine.
+**No API key, paid search subscription, extra server, or hosted model is needed.**
+This is unofficial, best-effort search: engines can throttle/block requests, and
+their terms apply. There is no guarantee of unlimited use.
+If general search fails, DDGS tries Wikipedia with the topic term (removing Mynd's
+standard `definition overview` query suffix). This fallback is narrower than general
+web search, but uses fetched reference pages—not snippets. Disambiguation pages
+are rejected rather than summarized as if they explained the topic.
+
+```bash
+mynd connect --web
+mynd connect --web --refresh-web  # Explicitly refresh cached sources
+```
+
+Search is limited to five results and three usable pages per topic. The reader
+respects robots.txt disallow rules, bounds redirects/download sizes, and rejects
+private-network targets (including DNS results and redirects). It does not run
+JavaScript or bypass logins, paywalls, or CAPTCHAs. Pages needing an interactive
+browser or unsupported formats may be skipped; search snippets alone never become
+an inspected source. Search and fetching need internet access; only synthesis is local.
+
+Configuration defaults in `config.toml`:
+
+```toml
+topics_folder = "20 Topics"
+maintenance_excludes = []       # e.g. ["Private/**", "Archive/**"]
+topic_web_enabled = false      # Opt in here, or per run with --web
+topic_web_provider = "ddgs"     # Alternative: "ollama"
+topic_web_cache_days = 30
+```
+
+#### Optional Ollama hosted provider and local keys
+
+Set `topic_web_provider = "ollama"` to use
+[Ollama's hosted search/fetch API](https://docs.ollama.com/capabilities/web-search)
+instead. Its documentation advertises a free tier, but the live service may require
+**usage credits or a subscription** for your account. HTTP **402** is an account
+billing/credits refusal, not a local-model or virtual-environment problem.
+Mynd neither buys credits nor silently falls back to another provider.
 
 Create a key at [ollama.com/settings/keys](https://ollama.com/settings/keys) and store
 it in **`.keys` next to your `config.toml`** as `export OLLAMA_API_KEY='your-key'`.
@@ -578,12 +615,8 @@ cp -n .keys.example .keys         # Preserve an existing local file
 chmod 600 .keys                  # Only your user can read/write it
 ```
 
-Edit `.keys` in your editor, then run Connect directly—no `source` is needed:
-
-```bash
-mynd connect --web
-mynd connect --web --refresh-web  # Explicitly refresh cached sources
-```
+Edit `.keys` in your editor, then run Connect directly—no `source` is needed.
+DDGS does not need a key or `.keys` file; existing keys can stay for optional backends.
 
 When web enrichment is enabled (`--web`, `--refresh-web`, or
 `topic_web_enabled = true`), Connect loads `.keys` next to the selected configuration
@@ -594,23 +627,19 @@ same file. Loading uses `python-dotenv`, not a shell: values are literal, with n
 command execution or variable expansion. Your active virtual environment and the
 parent terminal's environment remain unchanged.
 
-Only approved topic queries and selected public URLs go to Ollama's hosted API,
-**not vault text**. Retrieved page content is summarized by your local model. The
+Only approved topic queries go to the selected search provider; DDGS page requests
+go directly to the public websites. The Ollama provider instead sends queries and
+selected URLs to Ollama. **Vault text is not sent to search providers or websites.**
+Retrieved page content is summarized by your local model. The
 short overview is labeled **AI generated**, cites fetched sources, and records its
 retrieval date. Search snippets alone are not presented as inspected pages. The
 default cache lifetime is 30 days. On network/quota/key failure the supported local
 topic can still be written; prior valid web content is retained with a notice and
 the command returns **1**. A later run retries the failed stage. `--offline` makes
-no web requests and retains an already-generated web section.
-
-Configuration defaults in `config.toml`:
-
-```toml
-topics_folder = "20 Topics"
-maintenance_excludes = []       # e.g. ["Private/**", "Archive/**"]
-topic_web_enabled = false      # Opt in here, or per run with --web
-topic_web_cache_days = 30
-```
+no web requests and retains an already-generated web section. Web caches are
+provider-specific, so switching providers retries research without repeating
+completed local discovery/synthesis. Existing overviews remain intact if the new
+provider cannot fetch usable sources.
 
 Dotfolders (including `.obsidian`/`.trash`) and symlinks are excluded. Exclusions
 apply to both commands. Keep `data_path` outside the actual Obsidian vault so that
@@ -693,6 +722,9 @@ PDFs, extracted text, and SQLite data are stored locally. Crossref receives DOI 
 
 Vault maintenance stores passage/analysis caches and approvals in the local SQLite
 database, with note snapshots/journals under `data_path`. Topic discovery and all
-synthesis run locally. Optional `connect --web` sends only approved topic queries
-and selected URLs to Ollama's hosted search/fetch service; those queries can reveal
-your interests or private topic names. Web access is disabled by default.
+synthesis run locally. Optional `connect --web` sends approved topic queries to the
+configured search provider: DDGS uses public DuckDuckGo/Brave/Mojeek search, with a
+Wikipedia fallback, and fetches pages directly; the optional Ollama provider sends
+queries and URLs to Ollama.
+Queries and your website requests can reveal interests, private topic names, and
+your IP address, but never include vault passages. Web access is disabled by default.

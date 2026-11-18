@@ -23,7 +23,7 @@ from mynd.connect.policy import (
 from mynd.connect.progress import connect_reporting, progress_for
 from mynd.connect.progress import names as progress_names
 from mynd.connect.sources import support_count
-from mynd.connect.web import OllamaWeb
+from mynd.connect.web import WebResearch, build_web_client
 from mynd.identity import slugify
 from mynd.settings import Settings
 from mynd.storage.maintenance import MaintenanceStore
@@ -233,8 +233,11 @@ def _web_section(settings, store, writer, topic, enabled, refresh, web_client):
     if not enabled:
         progress("Web overview disabled; retaining any previous web content")
         return old_web, old_paragraphs, ""
-    key = digest(topic["query"])
+    key = _fingerprint([settings.topic_web_provider, topic["query"]])
     web = store.get("web", key)
+    if web is None and settings.topic_web_provider == "ollama":
+        # Retain caches written before web providers were selectable.
+        web = store.get("web", digest(topic["query"]))
     expired = True
     if web:
         try:
@@ -244,7 +247,7 @@ def _web_section(settings, store, writer, topic, enabled, refresh, web_client):
             pass
     try:
         if web is None or expired or refresh:
-            progress("Researching web overview: " + topic["query"])
+            progress(f"Researching web overview ({settings.topic_web_provider}): " + topic["query"])
             web = web_client.research(topic["query"])
             progress(f"Fetched {len(web['sources'])} web source(s): "
                      + progress_names(source.get("title", source.get("url", "")) for source in web["sources"]))
@@ -274,7 +277,7 @@ def _web_section(settings, store, writer, topic, enabled, refresh, web_client):
 def connect_vault(settings: Settings, writer: TopicWriter, *, reviewer: Reviewer | None = None,
                   all_notes: bool = False, dry_run: bool = False, reopen: bool = False,
                   web_enabled: bool | None = None, refresh_web: bool = False,
-                  web_client: OllamaWeb | None = None, breadth_overrides: dict[str, str] | None = None) -> dict:
+                  web_client: WebResearch | None = None, breadth_overrides: dict[str, str] | None = None) -> dict:
     """Reusable coordinator. New topics require explicit review even when unattended."""
     with maintenance_lock(settings, dry_run=dry_run), connect_reporting(writer) as progress:
         progress("Percentages count processed units within each phase, not elapsed time or model tokens.")
@@ -340,8 +343,9 @@ def connect_vault(settings: Settings, writer: TopicWriter, *, reviewer: Reviewer
                             "assessment_pending", "evidence_pending", "excluded",
                         }}
         own_web_client = web_client is None
-        web_client = web_client or OllamaWeb()
         enabled = settings.topic_web_enabled if web_enabled is None else web_enabled
+        if own_web_client and enabled:
+            web_client = build_web_client(settings.topic_web_provider)
         try:
             for _, (topic_id, topic) in progress.track(
                 6, "Update topics", list(topics.items()), "topics", lambda item: f"{item[1]['title']} → {item[1]['path']}",
@@ -509,7 +513,7 @@ def connect_vault(settings: Settings, writer: TopicWriter, *, reviewer: Reviewer
                     store.save()
                     progress.advance(message="Maintenance checkpoints saved")
         finally:
-            if own_web_client:
+            if own_web_client and web_client is not None:
                 web_client.close()
         progress(f"Finished: {len(topic_results)} topics processed, {len(pending)} awaiting review, "
                  f"{len(errors)} issue(s); {len(changes)} files {'proposed' if dry_run else 'changed'}")

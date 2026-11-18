@@ -1,10 +1,11 @@
-"""Ollama's hosted search/fetch only; local inference stays on the existing backend."""
+"""Selectable web research backends; all synthesis stays on the local model."""
 from __future__ import annotations
 
 import ipaddress
 import os
 import re
 from datetime import UTC, datetime
+from typing import Protocol
 from urllib.parse import urlsplit
 
 import httpx
@@ -13,7 +14,7 @@ from mynd.vault.safety import digest
 
 
 def public_url(value: str) -> bool:
-    if re.search(r"[\s<>\x00-\x1f]", value):
+    if re.search(r"[\s<>\\\x00-\x1f\x7f]", value):
         return False
     try:
         parsed = urlsplit(value)
@@ -32,18 +33,37 @@ def public_url(value: str) -> bool:
         return False
 
 
+class WebAccessError(ValueError):
+    """An account-level refusal that should not be hidden as a failed page."""
+
+
 class OllamaWeb:
     def __init__(self, api_key: str | None = None, client: httpx.Client | None = None):
         self.api_key = api_key if api_key is not None else os.environ.get("OLLAMA_API_KEY", "")
         self.client = client or httpx.Client(timeout=httpx.Timeout(30, connect=10))
+        self._access_error: str | None = None
 
     def _post(self, endpoint: str, payload: dict):
+        if self._access_error:
+            raise WebAccessError(self._access_error)
         if not self.api_key:
-            raise ValueError("Web overview pending: set OLLAMA_API_KEY (free Ollama account)")
+            raise ValueError(
+                "Set OLLAMA_API_KEY in .keys or the environment, "
+                "or use topic_web_provider = 'ddgs' for key-free search"
+            )
         response = self.client.post(
             "https://ollama.com/api/" + endpoint, json=payload,
             headers={"Authorization": "Bearer " + self.api_key},
         )
+        if response.status_code == 402:
+            # Do not echo arbitrary response bodies, headers, or credentials.
+            self._access_error = (
+                "Ollama web search/fetch requires usage credits for this account (HTTP 402). "
+                "Its advertised free tier is not available for this request. "
+                "Use topic_web_provider = 'ddgs' for key-free search, "
+                "or check https://ollama.com/settings/billing"
+            )
+            raise WebAccessError(self._access_error)
         response.raise_for_status()
         value = response.json()
         if not isinstance(value, dict):
@@ -77,12 +97,31 @@ class OllamaWeb:
                 if len(sources) == 3:
                     break
             except (httpx.HTTPError, ValueError, TypeError) as exc:
+                if isinstance(exc, WebAccessError):
+                    raise
                 # Do not include request headers, keys, or full response bodies in logs.
                 errors.append(type(exc).__name__)
         if not sources:
             raise ValueError("No usable web pages were fetched" + (": " + ", ".join(errors) if errors else ""))
-        return {"query": query, "fetched_at": datetime.now(UTC).isoformat(),
+        return {"query": query, "provider": "ollama", "fetched_at": datetime.now(UTC).isoformat(),
                 "sources": sources}
 
     def close(self):
         self.client.close()
+
+
+class WebResearch(Protocol):
+    def research(self, query: str) -> dict: ...
+
+    def close(self) -> None: ...
+
+
+def build_web_client(provider: str) -> WebResearch:
+    if provider == "ollama":
+        return OllamaWeb()
+    if provider == "ddgs":
+        # Offline Connect does not import or initialize the search library.
+        from mynd.connect.web_ddgs import DDGSWeb
+
+        return DDGSWeb()
+    raise ValueError("Unknown web provider; choose 'ddgs' or 'ollama'")

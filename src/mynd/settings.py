@@ -33,6 +33,7 @@ class Settings:
     maintenance_excludes: tuple[str, ...] = ()
     topic_web_enabled: bool = False
     topic_web_cache_days: int = 30
+    topic_web_provider: str = "ddgs"
 
     def __post_init__(self) -> None:
         folder = Path(self.topics_folder)
@@ -40,6 +41,8 @@ class Settings:
             raise ValueError("topics_folder must be a nonempty vault-relative folder")
         if self.topic_web_cache_days < 1:
             raise ValueError("topic_web_cache_days must be positive")
+        if self.topic_web_provider not in ("ddgs", "ollama"):
+            raise ValueError("topic_web_provider must be 'ddgs' or 'ollama'")
 
     @property
     def slides_inbox(self) -> Path:
@@ -91,4 +94,5 @@ def load_settings(path: Path) -> Settings:
         maintenance_excludes=tuple(excludes),
         topic_web_enabled=web_enabled,
         topic_web_cache_days=int(raw.get("topic_web_cache_days", 30)),
+        topic_web_provider=raw.get("topic_web_provider", "ddgs"),
     )

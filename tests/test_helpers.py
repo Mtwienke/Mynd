@@ -2,6 +2,7 @@ import hashlib
 import sqlite3
 
 import pymupdf
+import pytest
 
 from mynd.files import sha256_file
 from mynd.ingestion.extract_text import extract_text_and_doi
@@ -64,6 +65,22 @@ def test_load_settings_resolves_paths_relative_to_config(tmp_path):
     assert settings.database_path == tmp_path / "library.sqlite3"
     assert settings.grobid_url == "http://localhost:8070"
     assert settings.use_grobid is False
+    assert settings.topic_web_provider == "ddgs"
+
+
+@pytest.mark.parametrize("provider", ["ddgs", "ollama"])
+def test_load_settings_accepts_web_provider(config_file, provider):
+    with config_file.open("a", encoding="utf-8") as config:
+        config.write(f'topic_web_provider = "{provider}"\n')
+    assert load_settings(config_file).topic_web_provider == provider
+
+
+@pytest.mark.parametrize("provider", ['"unsupported"', "true", "[]"])
+def test_load_settings_rejects_unknown_web_provider(config_file, provider):
+    with config_file.open("a", encoding="utf-8") as config:
+        config.write(f"topic_web_provider = {provider}\n")
+    with pytest.raises(ValueError, match="topic_web_provider"):
+        load_settings(config_file)
 
 
 def test_write_review_queue_lists_unresolved_citations(tmp_path, config_file):
