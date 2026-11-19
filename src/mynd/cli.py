@@ -131,6 +131,9 @@ def connect_topics(
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show Ollama options, timings, token rates and runtime allocation"),
     json_output: bool = typer.Option(False, "--json", help="Print the full machine-readable report"),
     reclassify: list[str] | None = typer.Option(None, "--reclassify", help="Correct saved CANDIDATE_ID=BREADTH; repeatable"),
+    web_query: list[str] | None = typer.Option(
+        None, "--web-query", help="Correct a saved TOPIC_ID=PUBLIC_QUERY without renaming it; repeatable",
+    ),
 ) -> None:
     """Discover topic hubs; review new topics, then update approved connections."""
     settings = settings_from(config)
@@ -156,6 +159,12 @@ def connect_topics(
             if not separator or not identifier or not breadth:
                 raise ValueError("Use --reclassify CANDIDATE_ID=umbrella|established|specialized|niche")
             breadth_overrides[identifier] = breadth
+        web_queries = {}
+        for value in web_query or []:
+            identifier, separator, query = value.partition("=")
+            if not separator or not identifier or not query:
+                raise ValueError("Use --web-query TOPIC_ID=PUBLIC_QUERY")
+            web_queries[identifier] = query
         web_active = settings.topic_web_enabled if web is None else web
         keys_path = config.parent / ".keys"
         if web_active and keys_path.is_file():
@@ -164,6 +173,7 @@ def connect_topics(
             settings, TopicWriter(generator, progress), reviewer=reviewer, all_notes=all_notes,
             dry_run=dry_run, reopen=review, web_enabled=web, refresh_web=refresh_web,
             breadth_overrides=breadth_overrides,
+            web_query_overrides=web_queries,
         )
     except (OSError, ValueError, TypeError, RuntimeError, sqlite3.Error, httpx.HTTPError) as exc:
         typer.echo(f"Could not connect vault: {exc}", err=True)

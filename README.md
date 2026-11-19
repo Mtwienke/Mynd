@@ -568,22 +568,46 @@ then downloads and extracts readable HTML/plain-text pages on your machine.
 **No API key, paid search subscription, extra server, or hosted model is needed.**
 This is unofficial, best-effort search: engines can throttle/block requests, and
 their terms apply. There is no guarantee of unlimited use.
-If general search fails, DDGS tries Wikipedia with the topic term (removing Mynd's
-standard `definition overview` query suffix). This fallback is narrower than general
-web search, but uses fetched reference pages—not snippets. Disambiguation pages
-are rejected rather than summarized as if they explained the topic.
+If general search fails **or none of its pages can be fetched**, Mynd uses
+Wikipedia's official **full-text search API** with the reviewed query (removing
+Mynd's standard `definition overview` suffix). This searches article contents, not
+just title prefixes, so e.g. `Metaheuristic Algorithms` can find `Metaheuristic`.
+It prefers matching article titles/acronyms over unrelated biographies and rejects
+disambiguation pages. The fallback is narrower than general web search and can
+provide only related background, not necessarily coverage of every niche topic.
+The cited evidence still comes from fetched pages, never search snippets.
 
 ```bash
 mynd connect --web
 mynd connect --web --refresh-web  # Explicitly refresh cached sources
 ```
 
-Search is limited to five results and three usable pages per topic. The reader
+Search tries up to five general results and, if needed, five Wikipedia results;
+it stops after three usable pages. The reader
 respects robots.txt disallow rules, bounds redirects/download sizes, and rejects
 private-network targets (including DNS results and redirects). It does not run
 JavaScript or bypass logins, paywalls, or CAPTCHAs. Pages needing an interactive
 browser or unsupported formats may be skipped; search snippets alone never become
 an inspected source. Search and fetching need internet access; only synthesis is local.
+
+#### Fixing failed or overly specific queries
+
+An empty Wikipedia result is **not** evidence of throttling. Diagnostics distinguish
+no matching articles from HTTP errors, timeouts, and API rate limits. Novel or
+composite topic titles may need a shorter, established public query. Correct a
+saved topic's query without renaming it, changing approvals, or repeating completed
+local discovery/synthesis:
+
+```bash
+mynd connect --web --web-query 'topic-EXAMPLE=distributed optimization'
+# Repeat --web-query for multiple topics; use the topic note's full work_id.
+# --dry-run previews the correction without saving it.
+```
+
+Query corrections are remembered in SQLite and invalidate only the affected query's
+web cache. Your vault passages are never appended to the query. After a search fix,
+`mynd connect --web` retries failed web stages normally; **do not use `--all` or
+`--refresh-web` just to retry failures**. Prior valid overviews remain protected.
 
 Configuration defaults in `config.toml`:
 

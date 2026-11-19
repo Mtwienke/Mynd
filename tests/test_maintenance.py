@@ -607,6 +607,59 @@ def test_connect_selects_and_closes_its_own_web_backend(settings, provider):
     backend.close.assert_called_once()
 
 
+def test_public_query_correction_persists_without_renaming_or_repeating_local_work(settings):
+    note(settings, "one.md", "# One\n\nSelf-attention is a key concept for understanding tokens.")
+    writer, web = FakeWriter(), FakeWeb()
+    first = connect_vault(settings, writer, reviewer=approve, web_enabled=True, web_client=web)
+    topic_id = first["topics"][0]["id"]
+    prior_topic = MaintenanceStore(settings).get("topics", topic_id)
+    prior_calls = writer.calls.copy()
+    writer.fail = True
+    second = connect_vault(
+        settings, writer, web_enabled=True, web_client=web,
+        web_query_overrides={topic_id: "  attention mechanism machine learning  "},
+    )
+    assert second["status"] == "complete"
+    saved = MaintenanceStore(settings).get("topics", topic_id)
+    assert saved["query"] == "attention mechanism machine learning"
+    assert saved["title"] == prior_topic["title"] and saved["path"] == prior_topic["path"]
+    assert web.calls[-1] == saved["query"] and len(web.calls) == 2
+    assert writer.calls == prior_calls
+
+
+def test_public_query_correction_dry_run_does_not_persist(settings):
+    note(settings, "one.md", "# One\n\nSelf-attention is a key concept for understanding tokens.")
+    writer, web = FakeWriter(), FakeWeb()
+    first = connect_vault(settings, writer, reviewer=approve, web_enabled=True, web_client=web)
+    topic_id = first["topics"][0]["id"]
+    before = settings.database_path.read_bytes()
+    connect_vault(settings, writer, dry_run=True, web_enabled=True, web_client=web,
+                  web_query_overrides={topic_id: "attention mechanism"})
+    assert settings.database_path.read_bytes() == before
+
+
+@pytest.mark.parametrize("query", [
+    "", " ", "a\nb", "a\rb", "a\tb", "a\x7fb", "a\u2028b", "a\u2029b", "x" * 301,
+])
+def test_public_query_correction_rejects_invalid_query_without_state_changes(settings, query):
+    note(settings, "one.md", "# One\n\nSelf-attention is a key concept for understanding tokens.")
+    writer = FakeWriter()
+    first = connect_vault(settings, writer, reviewer=approve)
+    topic_id = first["topics"][0]["id"]
+    before = settings.database_path.read_bytes()
+    with pytest.raises(ValueError, match="Web query must be"):
+        connect_vault(settings, writer, web_query_overrides={topic_id: query})
+    assert settings.database_path.read_bytes() == before
+
+
+def test_public_query_correction_rejects_unknown_topic_before_discovery(settings):
+    writer = FakeWriter()
+    writer.fail = True
+    with pytest.raises(ValueError, match="existing topic ID"):
+        connect_vault(settings, writer, web_query_overrides={"unknown-topic": "metaheuristic"})
+    assert not settings.database_path.exists()
+
+
 def test_unreadable_supporting_note_defers_topic_update_instead_of_withdrawing_claims(settings):
     source = note(settings, "one.md", "# One\n\nSelf-attention is a key concept for understanding tokens.")
     writer = FakeWriter()

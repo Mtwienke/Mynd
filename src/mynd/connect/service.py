@@ -251,6 +251,8 @@ def _web_section(settings, store, writer, topic, enabled, refresh, web_client):
             web = web_client.research(topic["query"])
             progress(f"Fetched {len(web['sources'])} web source(s): "
                      + progress_names(source.get("title", source.get("url", "")) for source in web["sources"]))
+            if web.get("search_backend"):
+                progress("Web search backend: " + web["search_backend"])
             store.put("web", key, web)
         else:
             progress("Using cached web research")
@@ -277,7 +279,8 @@ def _web_section(settings, store, writer, topic, enabled, refresh, web_client):
 def connect_vault(settings: Settings, writer: TopicWriter, *, reviewer: Reviewer | None = None,
                   all_notes: bool = False, dry_run: bool = False, reopen: bool = False,
                   web_enabled: bool | None = None, refresh_web: bool = False,
-                  web_client: WebResearch | None = None, breadth_overrides: dict[str, str] | None = None) -> dict:
+                  web_client: WebResearch | None = None, breadth_overrides: dict[str, str] | None = None,
+                  web_query_overrides: dict[str, str] | None = None) -> dict:
     """Reusable coordinator. New topics require explicit review even when unattended."""
     with maintenance_lock(settings, dry_run=dry_run), connect_reporting(writer) as progress:
         progress("Percentages count processed units within each phase, not elapsed time or model tokens.")
@@ -289,6 +292,17 @@ def connect_vault(settings: Settings, writer: TopicWriter, *, reviewer: Reviewer
             store.put("candidate-breadths", identifier, {"breadth": breadth})
         errors = []
         topics_before = store.items("topics")
+        for identifier, query in (web_query_overrides or {}).items():
+            if identifier not in topics_before:
+                raise ValueError("--web-query requires an existing topic ID (the note's work_id)")
+            if (not isinstance(query, str) or not query.strip() or len(query) > 300
+                    or len(query.splitlines()) != 1
+                    or any(ord(char) < 32 or ord(char) == 127 for char in query)):
+                raise ValueError("Web query must be nonempty, single-line public text of at most 300 characters")
+        for identifier, query in (web_query_overrides or {}).items():
+            topic = dict(topics_before[identifier], query=query.strip())
+            topics_before[identifier] = topic
+            store.put("topics", identifier, topic)
         notes, catalog = _scan(settings, store, {t["path"] for t in topics_before.values()}, errors, progress)
         analyzed, cached = 0, 0
         candidates = []

@@ -1,13 +1,13 @@
 """Key-free search via DDGS and bounded local page extraction."""
 from __future__ import annotations
 
-import re
 from datetime import UTC, datetime
 
 import httpx
 
 from mynd.connect.web import public_url
 from mynd.connect.web_pages import PageFetcher, PageFetchError
+from mynd.connect.web_wikipedia import WikipediaSearch, WikipediaSearchError
 from mynd.vault.safety import digest
 
 # Explicit engines avoid sending topic queries to every backend DDGS supports.
@@ -15,32 +15,37 @@ SEARCH_BACKENDS = "duckduckgo,brave,mojeek"
 
 
 class DDGSWeb:
-    def __init__(self, fetcher: PageFetcher | None = None):
+    def __init__(
+        self, fetcher: PageFetcher | None = None, references: WikipediaSearch | None = None,
+    ):
         self.fetcher = fetcher or PageFetcher()
+        self._references = references
+        self._search_error = ""
 
     def _search(self, query: str) -> list[dict]:
         from ddgs import DDGS
-        from ddgs.exceptions import DDGSException
+        from ddgs.exceptions import DDGSException, RatelimitException, TimeoutException
 
         try:
             with DDGS(timeout=10) as search:
-                try:
-                    return search.text(query, max_results=5, backend=SEARCH_BACKENDS)
-                except DDGSException:
-                    # Topic overviews can still use a real public reference page
-                    # when general engines challenge/rate-limit this connection.
-                    # OpenSearch needs a topic term, not Mynd's default suffix.
-                    term = re.sub(r"\s+definition\s+overview$", "", query, flags=re.IGNORECASE)
-                    return search.text(term, max_results=1, backend="wikipedia")
+                return search.text(query, max_results=5, backend=SEARCH_BACKENDS)
         except DDGSException as exc:
-            # DDGS errors may include raw responses; expose only the error type.
-            raise ValueError(
-                f"DDGS search unavailable ({type(exc).__name__}); "
-                "search engines may be throttling or blocking requests. Try again later"
-            ) from None
+            # A base DDGSException also means "No results found", not necessarily
+            # throttling. Never echo its arbitrary remote response/body text.
+            if isinstance(exc, RatelimitException):
+                self._search_error = "rate limited"
+            elif isinstance(exc, TimeoutException):
+                self._search_error = "timed out"
+            else:
+                self._search_error = "no results or engine refusal (DDGSException)"
+            return []
 
-    def research(self, query: str) -> dict:
-        results = self._search(query)
+    def _reference_search(self, query: str) -> list[dict]:
+        if self._references is None:
+            self._references = WikipediaSearch()
+        return self._references.search(query)
+
+    def _fetch_sources(self, results: list[dict]) -> tuple[list[dict], list[str]]:
         if not isinstance(results, list):
             raise TypeError("DDGS returned an invalid result list")
         sources, seen, errors = [], set(), []
@@ -71,11 +76,40 @@ class DDGSWeb:
                     errors.append("HTTP " + str(exc.response.status_code))
                 else:
                     errors.append(type(exc).__name__)
+        return sources, errors
+
+    def research(self, query: str) -> dict:
+        self._search_error = ""
+        results = self._search(query)
+        if not isinstance(results, list):
+            self._search_error = "invalid DDGS result list"
+            results = []
+        sources, errors = self._fetch_sources(results)
+        backend = "general web search"
         if not sources:
-            detail = "; ".join(dict.fromkeys(errors)) or "no usable public search results"
-            raise ValueError("DDGS found no usable web pages: " + detail)
+            general = self._search_error or "; ".join(dict.fromkeys(errors)) or "no usable public search results"
+            try:
+                references = self._reference_search(query)
+            except WikipediaSearchError as exc:
+                raise ValueError(f"General search: {general}. {exc}") from None
+            sources, reference_errors = self._fetch_sources(references)
+            backend = "Wikipedia full-text API"
+            if not sources:
+                detail = "; ".join(dict.fromkeys(reference_errors))
+                if references:
+                    reason = "Wikipedia found articles, but no usable pages were fetched: " + detail
+                else:
+                    reason = (
+                        "Wikipedia full-text search found no matching articles (not a rate-limit error). "
+                        "Use a shorter, established public term with --web-query TOPIC_ID=QUERY"
+                    )
+                raise ValueError(f"General search: {general}. {reason}")
         return {"query": query, "provider": "ddgs", "fetched_at": datetime.now(UTC).isoformat(),
-                "sources": sources}
+                "search_backend": backend, "sources": sources}
 
     def close(self) -> None:
-        self.fetcher.close()
+        try:
+            self.fetcher.close()
+        finally:
+            if self._references is not None:
+                self._references.close()

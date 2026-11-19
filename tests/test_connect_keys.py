@@ -153,3 +153,24 @@ def test_connect_reports_unreadable_keys_and_closes_generator(connect_cli, tmp_p
     assert "Could not connect vault: Cannot read .keys" in result.stderr
     coordinator.assert_not_called()
     generator.close.assert_called_once()
+
+
+def test_connect_forwards_repeatable_public_query_corrections(connect_cli):
+    run, coordinator, generator = connect_cli
+    result = run("--web", "--web-query", "topic-one=distributed optimization",
+                 "--web-query", "topic-two=metaheuristics x=y")
+    assert result.exit_code == 0, result.output
+    assert coordinator.call_args.kwargs["web_query_overrides"] == {
+        "topic-one": "distributed optimization", "topic-two": "metaheuristics x=y",
+    }
+    generator.close.assert_called_once()
+
+
+@pytest.mark.parametrize("value", ["missing-separator", "=missing-topic", "topic-one="])
+def test_connect_rejects_malformed_public_query_option(connect_cli, value):
+    run, coordinator, generator = connect_cli
+    result = run("--web", "--web-query", value)
+    assert result.exit_code == 1
+    assert "Use --web-query TOPIC_ID=PUBLIC_QUERY" in result.stderr
+    coordinator.assert_not_called()
+    generator.close.assert_called_once()
